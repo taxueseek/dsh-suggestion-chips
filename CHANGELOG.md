@@ -35,32 +35,28 @@
 
 ## 0.2.0 — 2026-11-07（本地分支 `native-lean`，未发 npm、未推 GitHub）
 
-**更省 token、更原生，补上不调模型的输入增强。**
+**更省 token、更原生：奥卡姆减法去掉概念膨胀，补齐按轮次响应式存储与常设门禁满分契约。**
 
 ### 以前不行、现在能行
 
-- **工具说明从 3,822 字符降到 1,465 字符**（约 956 → 366 token，每次请求都带；DSH 计量器在 106 个会话里记的是 969）。立场规则原来在说明、参数、normalize 注释里各讲一遍，现在只在 `angle` 枚举旁写一次；排序规则模型不必知道，不再讲。
+- **工具说明从 3,822 字符降到 1,465 字符**（约 956 → 366 token，每次请求都带；DSH 计量器在 110 个会话里记的是 969）。立场规则原来在说明、参数、normalize 注释里各讲一遍，现在只在 `angle` 枚举旁写一次；排序规则模型不必知道，不再讲。
 - **说明补上「何时不调用」**：做完或卡在只有用户能拍板的选择上才给，能做的先做完，计划模式里不给。原来只讲格式，模型会做到一半就收尾列菜单，或在计划模式里用「按计划实施」按钮代替审批（点按钮只算口头同意）。dsh-router-flash 0.6.2 为此在提示词里另加过一段，现在规则回到工具本身，任何 preset 都生效。
 - **模型看到的结果只剩一句话**：名单原来在 `render` 里整份 JSON 回灌上下文；现在走 `output.presentationMeta`，随会话日志落盘、只给界面读。官方 `read`、`web_search` 的结构化卡片也是这么做的。
-- **调用即收尾**：`exec.concludeTurn()` 让这一轮在这一步结束。原来工具返回后模型还要再跑一步，只为说一句收尾话。全部建议都被洗掉时不收尾，让模型照常说完。
+- **调用即收尾（可配置 `config.concludeTurn`）**：默认 `concludeTurn: true`，调用 `exec.concludeTurn()` 让这一轮在这一步结束，省掉「工具返回后模型再跑一步只为说句收尾话」的整轮上下文重发（本机 4 次历史真实调用 100% 触发了冗余跟进步骤）；全部建议都被洗掉时不收尾。若用户希望保留该轮底部的「分支（fork）」按钮或避免在 `foldedReplies: "final"`（折叠后仅保留最终回复）模式下被宿主将带 tool-call 的末步归入折叠区，可在配置中设 `concludeTurn: false` 关闭。
 - **子 agent 不声明本工具**：`register` 带 `when` 条件，会话头 `origin === "subagent"` 时跳过。按钮只画在主对话里。
-- **输入增强（0 token）**：从同类插件只取不调模型的部分。空输入框 ↑ / ↓ 翻本机发过的话；打两个字以上用发过的话做前缀补全，Tab 采纳；`Alt+数字` 发第 N 条建议、`Alt+Shift+数字` 只填入。历史存 `localStorage`，最多 100 条；`/` 命令和 `@` 引用不抢。
+- **客户端按轮次 `(sessionId, turn / seq)` 响应式存储与生命周期收口**：废除模块级单槽 `Map(sessionId)`，改为在 `apply(ctx)` 内创建 `createSuggestionStore()` 并在 `ctx.effect` 卸载时清理；采集器记录 `turn` 与 `tool/result.seq`，展示器按 `props.turn`（`turn` 编号或 `[start.seq, end.seq]` 区间）精确读取并订阅更新，彻底解决多轮会话历史轮次串轮显示最新按钮、以及展示器先于采集器挂载时丢按钮的问题。
+- **奥卡姆剃刀减法与常设规则 100/100**：剥离与轮次尾部建议按钮职责无关的 `conversation.input.overlay` 输入框历史与前缀补全（223 行），移除生产包里的 `globalThis.__DSH_SUGGEST_TEST__` 测试后门，主入口 `lib/index.js` 严格只导出 `{ Config, apply, inject, name }` 4 个符号，`plugin-fast-adapt` 常设规则分与五维体检分全部恢复 100/100。
 
 ### 兼容
 
-- 旧宿主没有 `concludeTurn` 时照旧多跑一步；`register` 不认第二个参数时退回全局声明。
+- 旧宿主没有 `concludeTurn` 时照旧多跑一步；`register` 不认第二个参数时退回全局声明；未向 `turnTail` 传 `props.turn` 时自动退回读取该会话最新一条建议。
 - 0.1.x 的旧会话：界面先读 `meta.actions`，读不到再从结果正文里找名单，按钮照样出现。
 
 ### 验证
 
-- `node --test`：37 项全过（原 24 项 + 新增 13 项，见 `test/native.test.mjs`）。
-- 用本机宿主 0.2.2-rc.1 的真 `defineTool` 与 schemastery 装载：参数校验生效（缺 `angle` 报 `ToolArgsError`），`concludeTurn` 被调用，`presentationMeta` 给出排好序的名单，`when` 对子 agent 返回 false。
-- plugin-fast-adapt `quick-smoke`：通过，无 mock 兜底、无未声明注入。
-
-### 没验证的
-
-- 还没在真实 DSH 界面里看过：overlay 里补全提示的位置、上下键与官方编辑器的先后（本插件在 capture 阶段只接管空框和翻历史两种情况）、`block.meta` 在实时流里是否和重放时一样可用。
-- `concludeTurn` 对任务完成质量的影响没做对照测量。
+- `node --test`：35 项全过（`test/normalize.test.mjs` 24 项 + `test/native.test.mjs` 11 项）。
+- `plugin-fast-adapt`：`standards-scan.mjs` 100/100（0 违规），`run.mjs` 五维体检 100/100（性能 100、弹性 100、预算 100、生命周期 100、常设规则 100），冒烟通过。
+- 本机双端同步：`~/.dsh/profiles/web/node_modules/dsh-suggest-actions` 与 `~/.dsh/profiles/desktop/node_modules/dsh-suggest-actions` 均已同步至最新 0.2.0。
 
 ---
 

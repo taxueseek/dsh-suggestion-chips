@@ -1,5 +1,5 @@
 /**
- * 0.2.0 原生化回归：host 侧接线（省 token 三件事）与客户端纯逻辑（输入增强）。
+ * 0.2.0 原生化回归：host 侧接线（省 token、入口契约、concludeTurn 开关）与客户端按轮次响应式存储。
  *
  * 不依赖宿主：`@deepseek-ai/dsh-tools` 与 schemastery 用 loader 钩子换成最小桩，
  * 桩只做「原样返回定义」，所以测的是本插件自己的接线，不是宿主行为。
@@ -26,6 +26,12 @@ export async function load(url, context, next) {
 `));
 
 const host = await import("../lib/index.js");
+const {
+	TOOL_DESCRIPTION,
+	createSuggestionStore,
+	declaresFor,
+	readHostActions
+} = await import("../lib/normalize.js");
 
 /** 装一次插件，拿到注册的工具与 register 的第二个参数。 */
 function install(config) {
@@ -41,17 +47,21 @@ const ACTIONS = [
 	{ angle: "stop", label: "先不做" }
 ];
 
+test("主入口严格遵守函数插件 4 导出契约（loader-entry-shape）", () => {
+	assert.deepEqual(Object.keys(host).sort(), ["Config", "apply", "inject", "name"]);
+});
+
 test("工具说明压到 900 字符以内（0.1.14 为 2401）", () => {
-	assert.ok(host.description.length < 900, `实际 ${host.description.length}`);
+	assert.ok(TOOL_DESCRIPTION.length < 900, `实际 ${TOOL_DESCRIPTION.length}`);
 	const { tool } = install();
-	const schemaChars = JSON.stringify(tool.parameters).length + host.description.length;
+	const schemaChars = JSON.stringify(tool.parameters).length + tool.description.length;
 	assert.ok(schemaChars < 2000, `说明 + 参数 ${schemaChars} 字符（0.1.14 约 3700）`);
 });
 
 test("说明写明时机：做完或要用户拍板才给、计划模式不给、调用后本轮结束", () => {
-	assert.match(host.description, /only when the task is done or blocked/);
-	assert.match(host.description, /plan mode/);
-	assert.match(host.description, /turn ends right after this call/);
+	assert.match(TOOL_DESCRIPTION, /only when the task is done or blocked/);
+	assert.match(TOOL_DESCRIPTION, /plan mode/);
+	assert.match(TOOL_DESCRIPTION, /turn ends right after this call/);
 });
 
 test("模型看到的结果只有一句话，名单走 presentationMeta", () => {
@@ -64,7 +74,7 @@ test("模型看到的结果只有一句话，名单走 presentationMeta", () => 
 	assert.deepEqual(meta.actions.map((a) => a.label), ["先看日志", "跑测试", "先不做"], "推荐置顶、stop 垫底");
 });
 
-test("有按钮时 concludeTurn，全被洗掉时不收尾", async () => {
+test("有按钮时默认 concludeTurn，全被洗掉或显式关闭 concludeTurn 时不收尾", async () => {
 	const { tool } = install();
 	let concluded = 0;
 	const exec = { concludeTurn: () => { concluded += 1; } };
@@ -73,6 +83,10 @@ test("有按钮时 concludeTurn，全被洗掉时不收尾", async () => {
 	assert.deepEqual(await tool.execute({ actions: [{ label: "  " }] }, exec), { shown: 0 });
 	assert.equal(concluded, 1, "没有可用建议时让模型照常收尾");
 	assert.deepEqual(await tool.execute({ actions: ACTIONS }, {}), { shown: 3 }, "旧宿主没有 concludeTurn 也不报错");
+
+	const { tool: nonConcludingTool } = install({ concludeTurn: false });
+	assert.deepEqual(await nonConcludingTool.execute({ actions: ACTIONS }, exec), { shown: 3 });
+	assert.equal(concluded, 1, "concludeTurn: false 时不调用 exec.concludeTurn");
 });
 
 test("maxActions 配置照旧生效", async () => {
@@ -86,7 +100,7 @@ test("子 agent 不声明本工具，主会话与读不到会话头时照常声�
 	assert.equal(options.when({ agent: { session: { header: { origin: "subagent" } } } }), false);
 	assert.equal(options.when({ agent: { session: { header: {} } } }), true);
 	assert.equal(options.when({ agent: {} }), true);
-	assert.equal(host.declaresFor(undefined), true);
+	assert.equal(declaresFor(undefined), true);
 });
 
 test("旧宿主 register 不认第二个参数时退回全局注册", () => {
@@ -98,120 +112,141 @@ test("旧宿主 register 不认第二个参数时退回全局注册", () => {
 	assert.equal(calls.length, 1);
 });
 
-// ── 客户端纯逻辑 ────────────────────────────────────────────────────────────
-
-/** 在沙箱里跑一份 client.js，拿到测试入口；localStorage 用内存桩。 */
-function loadClient(stored = []) {
-	const store = new Map([["dsh-suggest-actions:history", JSON.stringify(stored)]]);
-	const sandbox = {
-		__DSH_SUGGEST_TEST__: {},
-		window: {
-			localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) },
-			__ModuleLoader__: { load: () => {} },
-			setTimeout
-		},
-		document: { documentElement: { lang: "zh-CN" } },
-		console
-	};
-	sandbox.globalThis = sandbox;
-	const source = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
-	vm.runInNewContext(source, sandbox);
-	// 沙箱里的数组属于另一个 realm，deepStrictEqual 会比原型；过一遍 JSON 只比内容。
-	const plain = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
-	const raw = sandbox.__DSH_SUGGEST_TEST__;
-	return {
-		api: { ...raw, readHostActions: (block) => plain(raw.readHostActions(block)), getHistory: () => plain(raw.getHistory()) },
-		store
-	};
-}
-
-/** 可变的假输入框 shell。 */
-function fakeShell(draft = "", phase = "plain") {
-	const shell = {
-		snapshot: { draft, phase },
-		state: { getSnapshot: () => shell.snapshot },
-		actions: { setDraft: (value) => { shell.snapshot = { ...shell.snapshot, draft: value }; } }
-	};
-	return shell;
-}
+// ── 客户端纯逻辑与按轮次存储 ──────────────────────────────────────────────────
 
 test("名单优先读 meta，旧会话日志退回结果正文", () => {
-	const { api } = loadClient();
 	const actions = [{ label: "a" }];
-	assert.deepEqual(api.readHostActions({ kind: "tool-result", meta: { actions }, content: [] }), actions);
+	assert.deepEqual(readHostActions({ kind: "tool-result", meta: { actions }, content: [] }), actions);
 	const legacy = { kind: "tool-result", content: [{ type: "text", text: "x" }, { type: "text", text: JSON.stringify({ rev: "0.1.14", actions }) }] };
-	assert.deepEqual(api.readHostActions(legacy), actions);
-	assert.deepEqual(api.readHostActions({ kind: "tool-result", content: [] }), []);
-	assert.deepEqual(api.readHostActions(null), []);
+	assert.deepEqual(readHostActions(legacy), actions);
+	assert.deepEqual(readHostActions({ kind: "tool-result", content: [] }), []);
+	assert.deepEqual(readHostActions(null), []);
 });
 
-test("前缀补全：取最近一条更长的历史；命令、引用、多行与过短前缀不补", () => {
-	const { api } = loadClient(["继续这个任务并提交", "继续未完成的任务", "/compact"]);
-	assert.equal(api.completionFor("继续"), "继续这个任务并提交");
-	assert.equal(api.completionFor("继续未"), "继续未完成的任务");
-	assert.equal(api.completionFor("继"), undefined, "少于 2 个字不补");
-	assert.equal(api.completionFor("继续这个任务并提交"), undefined, "已经是整句时不补");
-	assert.equal(api.completionFor("/co"), undefined);
-	assert.equal(api.completionFor("@fi"), undefined);
-	assert.equal(api.completionFor("继续\n"), undefined);
+test("按轮次存储：同一会话不同轮次互不串轮，支持 start 阶段记 turn 与 result 阶段按 seq 区间匹配", () => {
+	const store = createSuggestionStore();
+	const t1Actions = [{ label: "第 1 轮按钮" }];
+	const t3Actions = [{ label: "第 3 轮按钮" }];
+
+	// 第 1 轮：start 阶段带 turn=1，result 阶段带 seq=15
+	store.remember("s1", { phase: "start", callId: "c1", turn: 1 }, "c1");
+	assert.equal(store.remember("s1", { kind: "tool-result", callId: "c1", seq: 15, meta: { actions: t1Actions } }, "c1"), true);
+	assert.equal(store.remember("s1", { kind: "tool-result", callId: "c1", seq: 15, meta: { actions: t1Actions } }, "c1"), false, "相同内容重复写入不触发变更");
+
+	// 第 3 轮（直接从历史日志水合，无 start 阶段，仅靠 seq=40 落在 [30, 45] 区间匹配）
+	assert.equal(store.remember("s1", { kind: "tool-result", callId: "c3", seq: 40, meta: { actions: t3Actions } }, "c3"), true);
+
+	const turn1 = { turn: 1, start: { seq: 1 }, end: { seq: 20 } };
+	const turn2 = { turn: 2, start: { seq: 21 }, end: { seq: 29 } };
+	const turn3 = { turn: 3, start: { seq: 30 }, end: { seq: 45 } };
+
+	assert.deepEqual(store.take("s1", turn1), t1Actions, "第 1 轮拿到第 1 轮的建议");
+	assert.deepEqual(store.take("s1", turn2), [], "未调用 suggest_actions 的第 2 轮不串用其他轮次的建议");
+	assert.deepEqual(store.take("s1", turn3), t3Actions, "第 3 轮按 seq 区间拿到第 3 轮的建议");
+	assert.deepEqual(store.take("s1", undefined), t3Actions, "旧宿主未传 turn 时退回会话最新一条");
+
+	store.clear();
+	assert.deepEqual(store.take("s1", turn1), [], "clear 后全部清空");
 });
 
-test("发送时记历史：去重、新的在前、命令不记、上限 100", () => {
-	const { api, store } = loadClient(["旧的"]);
-	const shell = fakeShell("新的一句");
-	const assist = api.createAssistState(shell);
-	shell.snapshot = { draft: "新的一句", phase: "sending" };
-	assist.observe();
-	assert.deepEqual(api.getHistory(), ["新的一句", "旧的"]);
-	api.recordSent("旧的");
-	assert.deepEqual(api.getHistory(), ["旧的", "新的一句"]);
-	api.recordSent("/compact");
-	assert.equal(api.getHistory().length, 2);
-	for (let i = 0; i < 120; i += 1) api.recordSent(`第 ${i} 句`);
-	assert.equal(api.getHistory().length, 100);
-	assert.equal(JSON.parse(store.get("dsh-suggest-actions:history")).length, 100, "写回了 localStorage");
-});
+test("客户端 bundle：仅注册 toolview 与 turnTail 两个槽位，晚到采集可响应式唤醒 Tail，卸载时清理状态", () => {
+	let loadedDef;
+	const effects = [];
+	const stateSlots = [];
+	let currentHook = 0;
+	const FakeReact = {
+		useState(init) {
+			const idx = currentHook++;
+			if (!(idx in stateSlots)) {
+				stateSlots[idx] = typeof init === "function" ? init() : init;
+			}
+			const set = (next) => {
+				stateSlots[idx] = typeof next === "function" ? next(stateSlots[idx]) : next;
+			};
+			return [stateSlots[idx], set];
+		},
+		useEffect(fn) {
+			effects.push(fn);
+		},
+		useRef(val) {
+			return { current: val };
+		},
+		createElement(type, props, ...children) {
+			return { type, props, children };
+		}
+	};
+	const sandbox = {
+		window: {
+			__ModuleLoader__: {
+				load(def) {
+					loadedDef = def;
+				}
+			},
+			setTimeout: () => {},
+			navigator: { language: "zh-CN" }
+		},
+		document: {
+			documentElement: { lang: "zh-CN" },
+			createElement: () => ({}),
+			head: { appendChild: () => {} }
+		},
+		console
+	};
+	const source = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
+	vm.runInNewContext(source, sandbox);
+	assert.equal(loadedDef.id, "dsh-suggest-actions");
+	const plugin = loadedDef.factory(() => FakeReact);
+	assert.equal(plugin.name, "dsh-suggest-actions");
+	assert.deepEqual(Array.from(plugin.inject), ["slots"]);
 
-test("上下键：只在空输入框或正在翻历史时接管，↓ 翻到底清空", () => {
-	const { api } = loadClient(["第三句", "第二句", "第一句"]);
-	const shell = fakeShell("");
-	const assist = api.createAssistState(shell);
-	assert.equal(assist.keydown("ArrowDown"), false, "空框按 ↓ 不接管");
-	assert.equal(assist.keydown("ArrowUp"), true);
-	assert.equal(shell.snapshot.draft, "第三句");
-	assist.observe();
-	assert.equal(assist.keydown("ArrowUp"), true);
-	assert.equal(shell.snapshot.draft, "第二句");
-	assist.observe();
-	assert.equal(assist.keydown("ArrowDown"), true);
-	assert.equal(shell.snapshot.draft, "第三句");
-	assist.observe();
-	assert.equal(assist.keydown("ArrowDown"), true);
-	assert.equal(shell.snapshot.draft, "", "翻回底部清空");
-	assist.observe();
-	shell.snapshot = { draft: "我自己打的", phase: "plain" };
-	assist.observe();
-	assert.equal(assist.keydown("ArrowUp"), false, "草稿里有自己打的字时交还编辑器");
-});
+	const registered = new Map();
+	const cleanups = [];
+	plugin.apply({
+		effect(fn) {
+			const dispose = fn();
+			if (typeof dispose === "function") cleanups.push(dispose);
+		},
+		get() {
+			return undefined;
+		},
+		slots: {
+			inject(_name, fn) {
+				fn();
+			},
+			register(spec, Comp) {
+				registered.set(spec.name, Comp);
+			}
+		}
+	});
 
-test("上下键翻到历史尽头不越界；非 plain 阶段不接管", () => {
-	const { api } = loadClient(["唯一一句"]);
-	const shell = fakeShell("");
-	const assist = api.createAssistState(shell);
-	assert.equal(assist.keydown("ArrowUp"), true);
-	assist.observe();
-	assert.equal(assist.keydown("ArrowUp"), false, "到头了交还编辑器");
-	const busy = fakeShell("", "sending");
-	assert.equal(api.createAssistState(busy).keydown("ArrowUp"), false);
-});
+	assert.deepEqual([...registered.keys()], ["tool.call.toolview", "conversation.chat.turnTail"], "不再注册 conversation.input.overlay");
+	const Capture = registered.get("tool.call.toolview");
+	const Tail = registered.get("conversation.chat.turnTail");
+	const turn1 = { turn: 1, start: { seq: 1 }, end: { seq: 10 } };
 
-test("Tab 采纳补全；没有候选时不接管", () => {
-	const { api } = loadClient(["帮我提交并重启服务"]);
-	const shell = fakeShell("帮我");
-	const assist = api.createAssistState(shell);
-	assert.equal(assist.hint(), "帮我提交并重启服务");
-	assert.equal(assist.keydown("Tab"), true);
-	assert.equal(shell.snapshot.draft, "帮我提交并重启服务");
-	shell.snapshot = { draft: "没有匹配", phase: "plain" };
-	assert.equal(assist.keydown("Tab"), false);
+	// Tail 先挂载（此时 Capture 尚未渲染）
+	currentHook = 0;
+	assert.equal(Tail({ sessionId: "s1", turn: turn1 }), null);
+	const tailCleanups = effects.splice(0).map((fn) => fn());
+
+	// Capture 后渲染并执行 effect，唤醒已订阅的 Tail
+	Capture({
+		sessionId: "s1",
+		callId: "c1",
+		block: { kind: "tool-result", callId: "c1", seq: 5, meta: { actions: [{ label: "立刻点我" }] } }
+	});
+	for (const fn of effects.splice(0)) fn();
+
+	// 再次渲染 Tail，状态已被响应式更新为新建议
+	currentHook = 0;
+	const rendered = Tail({ sessionId: "s1", turn: turn1 });
+	assert.notEqual(rendered, null);
+	assert.equal(rendered.props["data-tool"], "suggest_actions");
+
+	// 插件卸载执行 ctx.effect 清理后，状态清空
+	for (const fn of tailCleanups) if (typeof fn === "function") fn();
+	for (const fn of cleanups) fn();
+	stateSlots.length = 0;
+	currentHook = 0;
+	assert.equal(Tail({ sessionId: "s1", turn: turn1 }), null);
 });
