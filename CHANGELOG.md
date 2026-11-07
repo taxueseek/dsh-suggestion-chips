@@ -8,7 +8,9 @@
 
 版本号习惯：新能力也走末位。0.1.2 是加功能，版本只从 0.1.1 走到 0.1.2，没有单独腾一个号段给"新功能"。
 
-**当前状态（2026-11-06 13:45 核实）**：源码版本 **0.1.14**，**npm 已发布 0.1.14**（`dist-tags.latest` 已指向它；刚发完 tarball 有约两分钟 CDN 延迟、期间 404，之后下载核对：包内 `assets/icon.svg` 是新图形、`xmllint` 合法、`PLUGIN_REV` 为 0.1.14、shasum 与发布记录一致）。GitHub `main` 已推到 `9c46ac3`。桌面端副本已同步（`assets/icon.svg`、`package.json`、`lib/index.js` 三处 `cmp` 一致），**要重启 DSH 并刷新页面**，插件列表才会显示新图标——重启前 host 仍加载 0.1.13。**推送时踩了一下**：keychain 里同时存着 `hiJoeLee` 和 `lezolin-ops` 两个 GitHub 账号，`git push` 默认取了后者的凭据、报 403；在地址里显式写上 `hiJoeLee@` 后推送成功（没有改凭据本身）。
+**当前状态（2026-11-07）**：本地分支 `native-lean` 上是 **0.2.0**（见下方 0.2.0 一节），只装进本机 web profile 试用，**没发 npm、没推 GitHub**。下面是 0.1.14 时的状态。
+
+**0.1.14 状态（2026-11-06 13:45 核实）**：源码版本 **0.1.14**，**npm 已发布 0.1.14**（`dist-tags.latest` 已指向它；刚发完 tarball 有约两分钟 CDN 延迟、期间 404，之后下载核对：包内 `assets/icon.svg` 是新图形、`xmllint` 合法、`PLUGIN_REV` 为 0.1.14、shasum 与发布记录一致）。GitHub `main` 已推到 `9c46ac3`。桌面端副本已同步（`assets/icon.svg`、`package.json`、`lib/index.js` 三处 `cmp` 一致），**要重启 DSH 并刷新页面**，插件列表才会显示新图标——重启前 host 仍加载 0.1.13。**推送时踩了一下**：keychain 里同时存着 `hiJoeLee` 和 `lezolin-ops` 两个 GitHub 账号，`git push` 默认取了后者的凭据、报 403；在地址里显式写上 `hiJoeLee@` 后推送成功（没有改凭据本身）。
 
 **当前状态（2026-11-06 07:20 核实）**：源码版本 **0.1.13**，**npm 已发布 0.1.13**（`dist-tags.latest` 指向它，tarball 已下载核对：11 个文件、`lib/client.js` 里含填入逻辑、sha1 与 registry 记录一致）。**0.1.10 / 0.1.11 / 0.1.12 三个号都没有单独上架**：0.1.10 当年那次发布其实没成功（registry 里从来没有这个版本），0.1.11、0.1.12 只在本机迭代；这三轮改动由 **0.1.13** 一次带上。发版这次换掉了令牌——旧令牌只够证明身份、没有"跳过二次验证"，怎么发都 403。GitHub `main` 已同步到 0.1.13（两笔提交：功能 + 更正 0.1.10 的发布状态说明），`git fetch` 回读确认本地与远端提交对象一致。市场描述 PR 已开：<https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/12406>（en/zh 两句补上"最多 5 条、悬停看全文、右侧填入按钮先清空再填入"），等维护者合并。桌面端副本已同步，但用户当时跑的是 **0.1.12**——宿主启动比新图标同步早约两分钟，重启并刷新页面后才真正到 0.1.13。
 
@@ -28,6 +30,37 @@
 
 **市场收录**：DSH 插件市场照一份精选目录收（awesome-dsh-plugin），**不按 npm 自动发现**——这个包原先不在那份目录里。收录条目在 `data/plugins/hiJoeLee__dsh-suggest-actions.yml`，本仓库这一份与线上内容逐字节一致（6 行，与对方仓库里其它条目同构）；**上架 PR 已于 2026-09-27 晚提出、2026-10-05 合并**：
 <https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/5991>（1 个文件；仓库的 `dsh-plugin` topic 也已加上）。**进展统一记在上面的「当前状态」，这里不重复第二份。**2026-10-06 03:45 在 PR 底下回过一句谢谢（已看到条目上线）：<https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/5991#issuecomment-6001758825>
+
+---
+
+## 0.2.0 — 2026-11-07（本地分支 `native-lean`，未发 npm、未推 GitHub）
+
+**更省 token、更原生，补上不调模型的输入增强。**
+
+### 以前不行、现在能行
+
+- **工具说明从 3,822 字符降到 1,465 字符**（约 956 → 366 token，每次请求都带；DSH 计量器在 106 个会话里记的是 969）。立场规则原来在说明、参数、normalize 注释里各讲一遍，现在只在 `angle` 枚举旁写一次；排序规则模型不必知道，不再讲。
+- **说明补上「何时不调用」**：做完或卡在只有用户能拍板的选择上才给，能做的先做完，计划模式里不给。原来只讲格式，模型会做到一半就收尾列菜单，或在计划模式里用「按计划实施」按钮代替审批（点按钮只算口头同意）。dsh-router-flash 0.6.2 为此在提示词里另加过一段，现在规则回到工具本身，任何 preset 都生效。
+- **模型看到的结果只剩一句话**：名单原来在 `render` 里整份 JSON 回灌上下文；现在走 `output.presentationMeta`，随会话日志落盘、只给界面读。官方 `read`、`web_search` 的结构化卡片也是这么做的。
+- **调用即收尾**：`exec.concludeTurn()` 让这一轮在这一步结束。原来工具返回后模型还要再跑一步，只为说一句收尾话。全部建议都被洗掉时不收尾，让模型照常说完。
+- **子 agent 不声明本工具**：`register` 带 `when` 条件，会话头 `origin === "subagent"` 时跳过。按钮只画在主对话里。
+- **输入增强（0 token）**：从同类插件只取不调模型的部分。空输入框 ↑ / ↓ 翻本机发过的话；打两个字以上用发过的话做前缀补全，Tab 采纳；`Alt+数字` 发第 N 条建议、`Alt+Shift+数字` 只填入。历史存 `localStorage`，最多 100 条；`/` 命令和 `@` 引用不抢。
+
+### 兼容
+
+- 旧宿主没有 `concludeTurn` 时照旧多跑一步；`register` 不认第二个参数时退回全局声明。
+- 0.1.x 的旧会话：界面先读 `meta.actions`，读不到再从结果正文里找名单，按钮照样出现。
+
+### 验证
+
+- `node --test`：37 项全过（原 24 项 + 新增 13 项，见 `test/native.test.mjs`）。
+- 用本机宿主 0.2.2-rc.1 的真 `defineTool` 与 schemastery 装载：参数校验生效（缺 `angle` 报 `ToolArgsError`），`concludeTurn` 被调用，`presentationMeta` 给出排好序的名单，`when` 对子 agent 返回 false。
+- plugin-fast-adapt `quick-smoke`：通过，无 mock 兜底、无未声明注入。
+
+### 没验证的
+
+- 还没在真实 DSH 界面里看过：overlay 里补全提示的位置、上下键与官方编辑器的先后（本插件在 capture 阶段只接管空框和翻历史两种情况）、`block.meta` 在实时流里是否和重放时一样可用。
+- `concludeTurn` 对任务完成质量的影响没做对照测量。
 
 ---
 

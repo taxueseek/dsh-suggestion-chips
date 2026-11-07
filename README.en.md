@@ -60,6 +60,14 @@ The few words the plugin draws itself ("Recommended", "N more", "Show less") fol
 
 Suggestions without a stance still render (backwards compatible).
 
+## Leaner and more native (0.2.0)
+
+- **Tool schema 3,822 → 1,465 chars** (≈956 → ≈366 tokens, sent on every request). Each rule is stated once, and the description now says *when not to call*: only when the task is done or blocked on a user-only choice, do doable steps first, never in plan mode.
+- **The model sees one sentence.** The suggestion list travels through `output.presentationMeta` (persisted with the session log, read by the UI only) instead of being echoed back as JSON.
+- **The turn ends at the call** via the host's `concludeTurn()`, saving one model round-trip per turn. Subagent sessions do not declare the tool.
+- **Zero-token input assist** in the composer: ↑/↓ on an empty box recalls what you sent (this browser only, 100 entries), typing 2+ characters that prefix a past message shows it and Tab accepts, `Alt+1…5` sends suggestion N and `Alt+Shift+N` only fills it.
+- Old hosts fall back gracefully (one extra step, global declaration); 0.1.x sessions still render their buttons.
+
 ## Limits
 
 - Requires the DSH **0.1.7** line (`conversation.chat.turnTail`, `conversation.input.shell`, `tool.call.toolview`).
