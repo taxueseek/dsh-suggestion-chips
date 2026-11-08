@@ -8,7 +8,7 @@
 
 版本号习惯：新能力也走末位。0.1.2 是加功能，版本只从 0.1.1 走到 0.1.2，没有单独腾一个号段给"新功能"。
 
-**当前状态（2026-11-07）**：本地分支 `native-lean` 上是 **0.2.0**（见下方 0.2.0 一节），只装进本机 web profile 试用，**没发 npm、没推 GitHub**。下面是 0.1.14 时的状态。
+**当前状态（2026-11-08）**：本地分支 `native-lean` 上是 **0.2.0**（见下方 0.2.0 一节），**没发 npm、没推 GitHub**。本机 web 与 desktop 两个 profile 都改成 `link:` 指向本仓库、直接跑工作区代码（desktop 原先是 npm 上的 0.1.9 拷贝，2026-11-08 换的），不再有需要手动覆盖的副本。依赖声明（`@deepseek-ai/dsh-tools`、`@deepseek-ai/schemastery`）与 `pnpm-lock.yaml` 已入库。下面是 0.1.14 时的状态。
 
 **0.1.14 状态（2026-11-06 13:45 核实）**：源码版本 **0.1.14**，**npm 已发布 0.1.14**（`dist-tags.latest` 已指向它；刚发完 tarball 有约两分钟 CDN 延迟、期间 404，之后下载核对：包内 `assets/icon.svg` 是新图形、`xmllint` 合法、`PLUGIN_REV` 为 0.1.14、shasum 与发布记录一致）。GitHub `main` 已推到 `9c46ac3`。桌面端副本已同步（`assets/icon.svg`、`package.json`、`lib/index.js` 三处 `cmp` 一致），**要重启 DSH 并刷新页面**，插件列表才会显示新图标——重启前 host 仍加载 0.1.13。**推送时踩了一下**：keychain 里同时存着 `hiJoeLee` 和 `lezolin-ops` 两个 GitHub 账号，`git push` 默认取了后者的凭据、报 403；在地址里显式写上 `hiJoeLee@` 后推送成功（没有改凭据本身）。
 
@@ -56,7 +56,7 @@
 
 - `node --test`：35 项全过（`test/normalize.test.mjs` 24 项 + `test/native.test.mjs` 11 项）。
 - `plugin-fast-adapt`：`standards-scan.mjs` 100/100（0 违规），`run.mjs` 五维体检 100/100（性能 100、弹性 100、预算 100、生命周期 100、常设规则 100），冒烟通过。
-- 本机双端同步：`~/.dsh/profiles/web/node_modules/dsh-suggest-actions` 与 `~/.dsh/profiles/desktop/node_modules/dsh-suggest-actions` 均已同步至最新 0.2.0。
+- 本机双端同步：`~/.dsh/profiles/web/node_modules/dsh-suggest-actions` 与 `~/.dsh/profiles/desktop/node_modules/dsh-suggest-actions` 均已同步至最新 0.2.0。（**2026-11-08 更正**：写这句时 desktop 那份其实还是 npm 上的 0.1.9 拷贝，只核了源码目录、没核安装位置的版本。当天已把 desktop 改成 `link:` 指向本仓库，两端这才真的同源。）
 
 ---
 
