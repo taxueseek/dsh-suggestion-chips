@@ -70,7 +70,7 @@ test("模型看到的结果只有一句话，名单走 presentationMeta", () => 
 	assert.equal(rendered.length, 1);
 	assert.doesNotMatch(rendered[0].text, /先看日志/);
 	const meta = tool.output.presentationMeta({ actions: ACTIONS });
-	assert.equal(meta.rev, "0.2.0");
+	assert.equal(meta.rev, "0.2.1");
 	assert.deepEqual(meta.actions.map((a) => a.label), ["先看日志", "跑测试", "先不做"], "推荐置顶、stop 垫底");
 });
 
@@ -197,7 +197,7 @@ test("客户端 bundle：仅注册 toolview 与 turnTail 两个槽位，晚到�
 	assert.equal(loadedDef.id, "dsh-suggest-actions");
 	const plugin = loadedDef.factory(() => FakeReact);
 	assert.equal(plugin.name, "dsh-suggest-actions");
-	assert.deepEqual(Array.from(plugin.inject), ["slots"]);
+	assert.deepEqual(Array.from(plugin.inject), ["slots", "sessions"]);
 
 	const registered = new Map();
 	const cleanups = [];
@@ -249,4 +249,107 @@ test("客户端 bundle：仅注册 toolview 与 turnTail 两个槽位，晚到�
 	stateSlots.length = 0;
 	currentHook = 0;
 	assert.equal(Tail({ sessionId: "s1", turn: turn1 }), null);
+});
+
+test("刷新后从会话事件流补名单：历史轮次的按钮不再因为 store 空而消失", () => {
+	let loadedDef;
+	const effects = [];
+	const stateSlots = [];
+	let currentHook = 0;
+	const FakeReact = {
+		useState(init) {
+			const idx = currentHook++;
+			if (!(idx in stateSlots)) stateSlots[idx] = typeof init === "function" ? init() : init;
+			return [stateSlots[idx], (next) => {
+				stateSlots[idx] = typeof next === "function" ? next(stateSlots[idx]) : next;
+			}];
+		},
+		useEffect(fn) {
+			effects.push(fn);
+		},
+		useRef(val) {
+			return { current: val };
+		},
+		createElement(type, props, ...children) {
+			return { type, props, children };
+		}
+	};
+	const source = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
+	vm.runInNewContext(source, {
+		window: {
+			__ModuleLoader__: { load: (def) => { loadedDef = def; } },
+			setTimeout: () => {},
+			navigator: { language: "zh-CN" }
+		},
+		document: {
+			documentElement: { lang: "zh-CN" },
+			createElement: () => ({}),
+			head: { appendChild: () => {} }
+		},
+		console
+	});
+
+	// 会话日志里已经落盘的名单（刷新前那一轮调用过 suggest_actions）
+	const historyEntries = [
+		{ event: { type: "turn/start", seq: 1, data: { turn: 1 } } },
+		{
+			event: {
+				type: "tool/result", seq: 5,
+				data: {
+					turn: 1,
+					message: { source: { callId: "c1" }, content: [{ type: "text", text: "2 suggestion(s) shown under your reply." }] },
+					meta: { rev: "0.2.0", actions: [{ label: "历史里的一条" }] }
+				}
+			}
+		},
+		{ event: { type: "turn/end", seq: 9, data: { turn: 1 } } }
+	];
+	let snapshot = { entries: historyEntries, change: { kind: "replace", entries: historyEntries } };
+	let listener;
+	const sessions = {
+		binding: (id) => (id === "s1"
+			? { eventSource: { getSnapshot: () => snapshot, subscribe: (fn) => { listener = fn; return () => { listener = undefined; }; } } }
+			: undefined)
+	};
+	const registered = new Map();
+	const plugin = loadedDef.factory(() => FakeReact);
+	plugin.apply({
+		effect(fn) {
+			fn();
+		},
+		get(name) {
+			return name === "sessions" ? sessions : undefined;
+		},
+		slots: {
+			inject(_name, fn) {
+				fn();
+			},
+			register(spec, Comp) {
+				registered.set(spec.name, Comp);
+			}
+		}
+	});
+
+	const Tail = registered.get("conversation.chat.turnTail");
+	const turn1 = { turn: 1, start: { seq: 1 }, end: { seq: 9 } };
+	// 首帧：store 空（刷新后没有实时采集）
+	currentHook = 0;
+	assert.equal(Tail({ sessionId: "s1", turn: turn1 }), null);
+	// effect 补历史 → setState → 重渲染
+	for (const fn of effects.splice(0)) fn();
+	currentHook = 0;
+	const rendered = Tail({ sessionId: "s1", turn: turn1 });
+	assert.notEqual(rendered, null, "没有实时采集也要从历史事件里把名单补上");
+	assert.equal(rendered.props["data-tool"], "suggest_actions");
+
+	// 之后新落盘的一轮：追加事件后订阅回调把它也补进来
+	const turn2 = { turn: 2, start: { seq: 20 }, end: { seq: 30 } };
+	const added = [
+		{ event: { type: "turn/start", seq: 20, data: { turn: 2 } } },
+		{ event: { type: "tool/result", seq: 25, data: { turn: 2, message: { source: { callId: "c2" }, content: [] }, meta: { actions: [{ label: "第二轮的一条" }] } } } }
+	];
+	snapshot = { entries: [...historyEntries, ...added], change: { kind: "append", entries: added } };
+	if (typeof listener === "function") listener();
+	currentHook = 0;
+	assert.notEqual(Tail({ sessionId: "s1", turn: turn2 }), null, "新轮次落盘后同样能显示");
 });
