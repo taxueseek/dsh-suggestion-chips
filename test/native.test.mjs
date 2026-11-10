@@ -70,7 +70,7 @@ test("模型看到的结果只有一句话，名单走 presentationMeta", () => 
 	assert.equal(rendered.length, 1);
 	assert.doesNotMatch(rendered[0].text, /先看日志/);
 	const meta = tool.output.presentationMeta({ actions: ACTIONS });
-	assert.equal(meta.rev, "0.2.1");
+	assert.equal(meta.rev, "0.2.2");
 	assert.deepEqual(meta.actions.map((a) => a.label), ["先看日志", "跑测试", "先不做"], "推荐置顶、stop 垫底");
 });
 
@@ -352,4 +352,108 @@ test("刷新后从会话事件流补名单：历史轮次的按钮不再因为 s
 	if (typeof listener === "function") listener();
 	currentHook = 0;
 	assert.notEqual(Tail({ sessionId: "s1", turn: turn2 }), null, "新轮次落盘后同样能显示");
+});
+
+test("Level 0 确定性提取与显式工具调用的优先级协调", () => {
+	const store = createSuggestionStore();
+
+	// 1. 无工具调用时，从文本提取出确定性按钮
+	assert.equal(store.rememberText("s1", 1, 10, "任务准备完毕，是否继续执行？"), true);
+	const t1 = store.take("s1", { turn: 1 });
+	assert.equal(t1.length, 2);
+	assert.equal(t1[0].label, "继续");
+
+	// 2. 之后显式工具调用到达，必须无缝覆盖确定性建议
+	const explicit = [{ label: "模型定制操作" }];
+	store.remember("s1", { kind: "tool-result", callId: "c1", turn: 1, seq: 12, meta: { actions: explicit } }, "c1");
+	assert.deepEqual(store.take("s1", { turn: 1 }), explicit, "显式工具结果具有最高优先级");
+
+	// 3. 已经有显式工具结果的轮次，后续文本事件不冲掉显式建议
+	assert.equal(store.rememberText("s1", 1, 15, "是否运行测试？"), false);
+	assert.deepEqual(store.take("s1", { turn: 1 }), explicit);
+});
+
+test("客户端无 tool/result 时从助手文本消息中水合渲染确定性建议按钮", () => {
+	let loadedDef;
+	const effects = [];
+	const stateSlots = [];
+	let currentHook = 0;
+	const FakeReact = {
+		useState(init) {
+			const idx = currentHook++;
+			if (!(idx in stateSlots)) stateSlots[idx] = typeof init === "function" ? init() : init;
+			return [stateSlots[idx], (next) => {
+				stateSlots[idx] = typeof next === "function" ? next(stateSlots[idx]) : next;
+			}];
+		},
+		useEffect(fn) {
+			effects.push(fn);
+		},
+		useRef(val) {
+			return { current: val };
+		},
+		createElement(type, props, ...children) {
+			return { type, props, children };
+		}
+	};
+	const source = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
+	vm.runInNewContext(source, {
+		window: {
+			__ModuleLoader__: { load: (def) => { loadedDef = def; } },
+			setTimeout: () => {},
+			navigator: { language: "zh-CN" }
+		},
+		document: {
+			documentElement: { lang: "zh-CN" },
+			createElement: () => ({}),
+			head: { appendChild: () => {} }
+		},
+		console
+	});
+
+	// 事件流里没有任何 tool/result，只有 assistant 的纯文本消息
+	const historyEntries = [
+		{ event: { type: "turn/start", seq: 1, data: { turn: 1 } } },
+		{
+			event: {
+				type: "message", seq: 3,
+				data: {
+					turn: 1,
+					message: {
+						source: { kind: "assistant" },
+						content: [{ type: "text", text: "已修改全部文件，请确认是否提交本次修改？" }]
+					}
+				}
+			}
+		},
+		{ event: { type: "turn/end", seq: 4, data: { turn: 1 } } }
+	];
+	const snapshot = { entries: historyEntries, change: { kind: "replace", entries: historyEntries } };
+	const sessions = {
+		binding: (id) => (id === "s2"
+			? { eventSource: { getSnapshot: () => snapshot, subscribe: () => () => {} } }
+			: undefined)
+	};
+	const registered = new Map();
+	const plugin = loadedDef.factory(() => FakeReact);
+	plugin.apply({
+		effect(fn) { fn(); },
+		get(name) { return name === "sessions" ? sessions : undefined; },
+		slots: {
+			inject(_name, fn) { fn(); },
+			register(spec, Comp) { registered.set(spec.name, Comp); }
+		}
+	});
+
+	const Tail = registered.get("conversation.chat.turnTail");
+	const turn1 = { turn: 1, start: { seq: 1 }, end: { seq: 4 } };
+	// 首帧
+	currentHook = 0;
+	assert.equal(Tail({ sessionId: "s2", turn: turn1 }), null);
+	// 跑 effect 水合
+	for (const fn of effects.splice(0)) fn();
+	currentHook = 0;
+	const rendered = Tail({ sessionId: "s2", turn: turn1 });
+	assert.notEqual(rendered, null, "即使没有 tool/result，也能从消息文本中提取渲染出按钮");
+	assert.equal(rendered.props["data-tool"], "suggest_actions");
 });

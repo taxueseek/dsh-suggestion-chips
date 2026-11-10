@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeActions } from "../lib/normalize.js";
+import { extractDeterministicActions, normalizeActions } from "../lib/normalize.js";
 
 test("正常输入：原样保留，顺序不变", () => {
 	assert.deepEqual(
@@ -202,4 +202,59 @@ test("opensNewSession：只保留第一条，后面的丢掉", () => {
 		], 3),
 		[{ label: "甲", opensNewSession: true }]
 	);
+});
+
+test("extractDeterministicActions：非字符串或太短输入一律返回空", () => {
+	for (const bad of [undefined, null, 123, {}, "短", "   "]) {
+		assert.deepEqual(extractDeterministicActions(bad), []);
+	}
+});
+
+test("extractDeterministicActions：确认句提取（是否继续 / 是否提交 / 是否测试）", () => {
+	const c1 = extractDeterministicActions("请确认是否继续执行下一步任务？");
+	assert.equal(c1.length, 2);
+	assert.equal(c1[0].label, "继续");
+	assert.equal(c1[0].recommended, true);
+	assert.equal(c1[1].label, "先暂停");
+	assert.equal(c1[1].angle, "stop");
+
+	const c2 = extractDeterministicActions("修改完毕，需要我提交代码并推送到远端吗？");
+	assert.equal(c2.length, 3);
+	assert.deepEqual(c2.map((a) => a.label), ["提交并推送", "查看 git diff", "先不提交"]);
+	assert.equal(c2[0].recommended, true);
+
+	const c3 = extractDeterministicActions("单测已写好，是否运行测试？");
+	assert.equal(c3.length, 2);
+	assert.deepEqual(c3.map((a) => a.label), ["运行测试", "跳过测试"]);
+});
+
+test("extractDeterministicActions：选项列表提取（带编号与立场分流）", () => {
+	const text = `
+接下来有三种处理方式：
+1. 立即运行单测验证修改
+2. 查看当前修改并生成 commit
+3. 放弃修改并退出流程
+请选择。
+`;
+	const actions = extractDeterministicActions(text);
+	assert.equal(actions.length, 3);
+	assert.match(actions[0].label, /^1\.\s*立即运行单测/);
+	assert.equal(actions[0].recommended, true);
+	assert.equal(actions[0].angle, "standard");
+	assert.match(actions[1].label, /^2\.\s*查看当前修改/);
+	assert.match(actions[2].label, /^3\.\s*放弃修改/);
+	assert.equal(actions[2].angle, "stop");
+});
+
+test("extractDeterministicActions：工程收尾推进（无问句时建议验证与提交）", () => {
+	const text = "代码重构已完成，所有接口定义已同步更新完毕。";
+	const actions = extractDeterministicActions(text);
+	assert.equal(actions.length, 3);
+	assert.deepEqual(actions.map((a) => a.label), ["跑测试验证", "查看 git diff", "提交本次修改"]);
+	assert.equal(actions[0].recommended, true);
+});
+
+test("extractDeterministicActions：开放式闲聊或普通回答克制不弹按钮", () => {
+	assert.deepEqual(extractDeterministicActions("这是一个用于处理数据的工具函数。"), []);
+	assert.deepEqual(extractDeterministicActions("你觉得为什么会有这个性能瓶颈？"), []);
 });
