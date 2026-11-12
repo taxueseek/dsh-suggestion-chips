@@ -70,7 +70,8 @@ test("模型看到的结果只有一句话，名单走 presentationMeta", () => 
 	assert.equal(rendered.length, 1);
 	assert.doesNotMatch(rendered[0].text, /先看日志/);
 	const meta = tool.output.presentationMeta({ actions: ACTIONS });
-	assert.equal(meta.rev, "0.2.5");
+	assert.equal(meta.rev, "0.3.0");
+	assert.equal(meta.displayMode, "both", "默认呈现形态为 both 双形态联动");
 	assert.deepEqual(meta.actions.map((a) => a.label), ["先看日志", "跑测试", "先不做"], "推荐置顶、stop 垫底");
 });
 
@@ -538,4 +539,122 @@ test("客户端英文场景水合：无 tool/result 时从英文助手文本渲�
 	const rendered = Tail({ sessionId: "s3", turn: turn1 });
 	assert.notEqual(rendered, null, "英文助手文本也要能水合出按钮");
 	assert.equal(rendered.props["data-tool"], "suggest_actions");
+});
+
+test("displayMode 配置生效：支持 both、chips、tab、none 四档模式", () => {
+	const cBoth = install({ displayMode: "both" });
+	assert.equal(cBoth.tool.output.presentationMeta({ actions: ACTIONS }).displayMode, "both");
+
+	const cChips = install({ displayMode: "chips" });
+	assert.equal(cChips.tool.output.presentationMeta({ actions: ACTIONS }).displayMode, "chips");
+
+	const cTab = install({ displayMode: "tab" });
+	assert.equal(cTab.tool.output.presentationMeta({ actions: ACTIONS }).displayMode, "tab");
+
+	const cNone = install({ displayMode: "none" });
+	assert.equal(cNone.tool.output.presentationMeta({ actions: ACTIONS }).displayMode, "none");
+});
+
+test("displayMode 为 tab 或 none 时，TurnTail 胶囊组件返回 null，不渲染按钮", () => {
+	const store = createSuggestionStore();
+	store.remember("s-tab", {
+		kind: "tool-result",
+		callId: "c1",
+		turn: 1,
+		meta: { displayMode: "tab", actions: [{ label: "测试按钮" }] }
+	});
+	assert.equal(store.getDisplayMode("s-tab"), "tab");
+
+	store.remember("s-none", {
+		kind: "tool-result",
+		callId: "c2",
+		turn: 1,
+		meta: { displayMode: "none", actions: [{ label: "测试按钮" }] }
+	});
+	assert.equal(store.getDisplayMode("s-none"), "none");
+
+	store.remember("s-both", {
+		kind: "tool-result",
+		callId: "c3",
+		turn: 1,
+		meta: { displayMode: "both", actions: [{ label: "测试按钮" }] }
+	});
+	assert.equal(store.getDisplayMode("s-both"), "both");
+});
+
+test("输入框 Tab 采纳推荐项与尾部胶囊双向联动闭环", () => {
+	const store = createSuggestionStore();
+	store.remember("s-link", {
+		kind: "tool-result",
+		callId: "c1",
+		turn: 1,
+		meta: {
+			displayMode: "both",
+			actions: [
+				{ label: "常规推进", angle: "standard" },
+				{ label: "先跑单元测试", angle: "cautious", recommended: true },
+				{ label: "暂不修改", angle: "stop" }
+			]
+		}
+	});
+
+	let notified = 0;
+	store.subscribe("s-link", () => { notified += 1; });
+
+	// 模拟输入框按 Tab 采纳了推荐项
+	const actionsBefore = store.take("s-link", 1);
+	const best = actionsBefore.find((a) => a.recommended === true);
+	assert.equal(best.label, "先跑单元测试");
+	assert.equal(best.adopted, undefined);
+
+	// 触发采纳
+	store.rememberUserText("s-link", best.label);
+	store.notify("s-link");
+
+	assert.equal(notified, 1);
+	const actionsAfter = store.take("s-link", 1);
+	const bestAfter = actionsAfter.find((a) => a.recommended === true);
+	assert.equal(bestAfter.adopted, true, "按 Tab 采纳后尾部对应胶囊自动标记为已采纳");
+});
+
+test("中英文语言环境下的 Tab 徽章与高危安全拦截文案效果", () => {
+	const source = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
+
+	// 中文环境沙箱
+	const zhSandbox = {
+		window: {
+			__ModuleLoader__: { load() {} },
+			navigator: { language: "zh-CN" }
+		},
+		document: {
+			documentElement: { lang: "zh-CN" },
+			createElement: () => ({ style: {} }),
+			head: { appendChild: () => {} }
+		},
+		console
+	};
+	vm.runInNewContext(source, zhSandbox);
+	const zhStrings = zhSandbox.window.__uiStrings__();
+	assert.equal(zhStrings.tabBadge, "Tab 采纳");
+	assert.equal(zhStrings.tabDangerBadge, "⚠ 高危: Tab 填入草稿");
+	assert.equal(zhStrings.recommended, "推荐");
+
+	// 英文环境沙箱
+	const enSandbox = {
+		window: {
+			__ModuleLoader__: { load() {} },
+			navigator: { language: "en-US" }
+		},
+		document: {
+			documentElement: { lang: "en-US" },
+			createElement: () => ({ style: {} }),
+			head: { appendChild: () => {} }
+		},
+		console
+	};
+	vm.runInNewContext(source, enSandbox);
+	const enStrings = enSandbox.window.__uiStrings__();
+	assert.equal(enStrings.tabBadge, "Tab to accept");
+	assert.equal(enStrings.tabDangerBadge, "⚠ Danger: Tab to fill draft");
+	assert.equal(enStrings.recommended, "Recommended");
 });

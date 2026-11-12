@@ -68,6 +68,25 @@ Suggestions without a stance still render (backwards compatible).
 - **Per-turn reactive store owned by `apply(ctx)`**: suggestions are indexed by `(sessionId, turn / seq)` with subscriber notifications and cleaned up via `ctx.effect`, preventing cross-turn duplication and mount-order races while keeping the package strictly focused on turn-tail action buttons.
 - Old hosts fall back gracefully (one extra step, global declaration); 0.1.x sessions still render their buttons.
 
+## Configuration & Dual-Mode (0.3.0)
+
+Configured via the bundle patch in your profile:
+
+```yaml
+- insert:
+    - id: suggestion-chips
+      name: 'dsh-suggestion-chips'
+      config:
+        displayMode: both  # both (default, chips + Tab ghost) | chips (tail buttons only) | tab (composer ghost only) | none
+        maxActions: 5      # 1-6 actions per turn
+        concludeTurn: true # end turn immediately upon calling suggest_actions
+```
+
+- **`both` (Default)**: Combines turn-tail suggestion chips with an inline ghost suggestion in the empty composer. Press `Tab` to accept the recommended action into the draft instantly, with full 2-way sync marking the chip as adopted.
+- **`chips`**: Tail suggestion chips only.
+- **`tab`**: Minimalist Claude Code / Codex style composer ghost prediction only.
+- **IME & Danger Protection**: Completely suspends key interception during Chinese Pinyin composition; high-risk actions are marked with warning badges and forced to draft-only when Tab is pressed.
+
 ## Limits
 
 - Requires the DSH **0.1.7** line (`conversation.chat.turnTail`, `conversation.input.shell`, `tool.call.toolview`).
