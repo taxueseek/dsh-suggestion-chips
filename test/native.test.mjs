@@ -658,3 +658,82 @@ test("中英文语言环境下的 Tab 徽章与高危安全拦截文案效果", 
 	assert.equal(enStrings.tabDangerBadge, "⚠ Danger: Tab to fill draft");
 	assert.equal(enStrings.recommended, "Recommended");
 });
+
+test("客户端水合支持 DSH 真实事件类型 assistant/message 与 user/message", () => {
+	let loadedDef;
+	const effects = [];
+	const stateSlots = [];
+	let currentHook = 0;
+	const FakeReact = {
+		useState(init) {
+			const idx = currentHook++;
+			if (!(idx in stateSlots)) {
+				stateSlots[idx] = typeof init === "function" ? init() : init;
+			}
+			const set = (next) => {
+				stateSlots[idx] = typeof next === "function" ? next(stateSlots[idx]) : next;
+			};
+			return [stateSlots[idx], set];
+		},
+		useEffect(fn) {
+			effects.push(fn);
+		},
+		useRef(val) {
+			return { current: val };
+		},
+		createElement(type, props, ...children) {
+			return { type, props, children };
+		}
+	};
+	const source = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
+	const sandbox = {
+		window: {
+			__ModuleLoader__: { load(def) { loadedDef = def; } },
+			setTimeout: () => {},
+			navigator: { language: "zh-CN" }
+		},
+		document: {
+			documentElement: { lang: "zh-CN" },
+			createElement: () => ({ style: {} }),
+			head: { appendChild: () => {} }
+		},
+		console
+	};
+	vm.runInNewContext(source, sandbox);
+	const plugin = loadedDef.factory(() => FakeReact);
+
+	const entries = [
+		{ event: { type: "system/message", seq: 1 } },
+		{ event: { type: "user/message", seq: 2, data: { message: { content: "怎么改？" } } } },
+		{ event: { type: "assistant/message", seq: 3, data: { turn: 1, message: { content: "修改已完成，请问是否继续下一步？" } } } }
+	];
+
+	const fakeEventSource = {
+		getSnapshot: () => ({ entries }),
+		subscribe: () => () => {}
+	};
+	const fakeSessions = {
+		binding: (id) => (id === "sess-real" ? { eventSource: fakeEventSource } : undefined)
+	};
+
+	const registered = new Map();
+	plugin.apply({
+		effect() {},
+		get(name) { return name === "sessions" ? fakeSessions : undefined; },
+		slots: {
+			inject(_name, fn) { fn(); },
+			register(spec, Comp) { registered.set(spec.name, Comp); }
+		}
+	});
+
+	const Tail = registered.get("conversation.chat.turnTail");
+	currentHook = 0;
+	Tail({ sessionId: "sess-real", turn: { turn: 1 } });
+	// 执行 useEffect 触发 hydrateFromEvents
+	for (const ef of effects) ef();
+
+	// 重新渲染验证水合出的动作
+	currentHook = 0;
+	const rendered = Tail({ sessionId: "sess-real", turn: { turn: 1 } });
+	assert.notEqual(rendered, null, "成功识别 assistant/message 并水合渲染按钮");
+});
