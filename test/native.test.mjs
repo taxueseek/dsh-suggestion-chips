@@ -1040,3 +1040,123 @@ test("contenteditable 输入框：幽灵与官方 placeholder 不同时显示（
 	assert.notEqual(official.style.visibility, "hidden", "隐藏幽灵后官方 placeholder 恢复可见");
 	assert.equal(overlay.style.display, "none", "幽灵已隐藏");
 });
+
+test("Tab 采纳走 composer 的 setDraft，不改 contenteditable 文本", () => {
+	let loadedDef = null;
+	let tick = null;
+	const source = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
+
+	class FakeEl {
+		constructor(tagName) {
+			this.tagName = tagName.toUpperCase();
+			this.style = {};
+			this.attributes = new Map();
+			this.children = [];
+			this.textContent = "";
+			this.value = "";
+			this.parentElement = null;
+			this.isConnected = true;
+			this.focused = false;
+		}
+		setAttribute(k, v) { this.attributes.set(k, String(v)); }
+		getAttribute(k) { return this.attributes.get(k) ?? null; }
+		hasAttribute(k) { return this.attributes.has(k); }
+		removeAttribute(k) { this.attributes.delete(k); }
+		get dataset() { return { placeholder: this.attributes.get("data-placeholder") }; }
+		appendChild(child) { child.parentElement = this; this.children.push(child); return child; }
+		closest() { return this.parentElement; }
+		querySelector() { return null; }
+		contains() { return false; }
+		focus() { this.focused = true; sandbox.document.activeElement = this; }
+		addEventListener() {}
+		removeEventListener() {}
+		dispatchEvent() {}
+	}
+
+	const scroll = new FakeEl("div");
+	scroll.setAttribute("data-input-scroll", "true");
+	const editable = new FakeEl("div");
+	editable.setAttribute("data-composer-input", "true");
+	editable.setAttribute("data-placeholder", "发消息…");
+	scroll.appendChild(editable);
+	const official = new FakeEl("div");
+	official.setAttribute("data-composer-placeholder", "true");
+	scroll.appendChild(official);
+
+	const listeners = {};
+	const sandbox = {
+		window: {
+			__ModuleLoader__: { load(def) { loadedDef = def; } },
+			setTimeout: () => {},
+			navigator: { language: "zh-CN" },
+			getComputedStyle: () => ({ paddingTop: "8px", paddingLeft: "12px", font: "14px sans-serif" }),
+			addEventListener: (type, fn) => { listeners[type] = fn; },
+			removeEventListener: () => {}
+		},
+		document: {
+			documentElement: { lang: "zh-CN" },
+			activeElement: null,
+			querySelector: (sel) => (sel.includes("data-composer-input") ? editable : null),
+			createElement: (tag) => new FakeEl(tag),
+			createTextNode: (t) => ({ text: t }),
+			head: { appendChild: () => {} }
+		},
+		setInterval: (fn) => { tick = fn; return 1; },
+		clearInterval: () => {},
+		console
+	};
+	vm.runInNewContext(source, sandbox);
+
+	const mockReact = {
+		useState(initial) { return [typeof initial === "function" ? initial() : initial, () => {}]; },
+		useEffect() {},
+		useRef() { return { current: null }; },
+		createElement(type, props, ...children) { return { type, props, children }; }
+	};
+	const registered = new Map();
+	const setDraftCalls = [];
+	const ctx = {
+		effect() {},
+		get(name) {
+			if (name === "conversation") {
+				return {
+					input: {
+						shell: () => ({
+							actions: { setDraft: (v) => setDraftCalls.push(v) },
+							focus() {}
+						})
+					}
+				};
+			}
+			if (name === "sessions") {
+				return { list: { getSnapshot: () => ({ current: { id: "sess-tab" }, byId: { "sess-tab": { running: false } } }), subscribe: () => () => {} } };
+			}
+			return undefined;
+		},
+		slots: { inject(_n, fn) { fn(); }, register(spec, Comp) { registered.set(spec.name, Comp); } }
+	};
+	loadedDef.factory(() => mockReact).apply(ctx);
+
+	const Capture = registered.get("tool.call.toolview");
+	Capture({
+		sessionId: "sess-tab",
+		block: { kind: "tool-result", meta: { actions: [{ label: "采纳方案并执行", prompt: "采纳该方案，请直接执行", recommended: true }] } }
+	});
+	tick();
+	const overlayEl = scroll.children.find((c) => c.className === "dsh-suggest-ghost-overlay");
+	assert.ok(overlayEl, "幽灵已显示");
+	assert.equal(overlayEl.style.display, "inline-flex");
+
+	// 模拟按 Tab（window 捕获阶段，与真实运行同一条路）
+	editable.focus();
+	listeners.keydown({ key: "Tab", preventDefault() {}, stopPropagation() {} });
+
+	assert.equal(setDraftCalls.length, 1, "Tab 必须走 setDraft，而不是直接写 contenteditable");
+	assert.equal(setDraftCalls[0], "采纳该方案，请直接执行");
+	assert.equal(editable.textContent, "", "不得直接改写 contenteditable 的文本");
+	assert.equal(overlayEl.style.display, "none", "采纳后幽灵隐藏");
+});
+
+function document0(sandbox) {
+	return sandbox.document.querySelector(".dsh-suggest-ghost-overlay") !== null;
+}
