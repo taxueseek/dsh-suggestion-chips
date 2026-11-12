@@ -6,7 +6,34 @@
 
 Clickable **suggestion chips** under every reply in DeepSeek Harness. One click sends that text as your message — no typing. Each suggestion also has a small fill button on its right: it only puts that sentence into the composer, so you can edit it before sending. Destructive high-risk actions are marked with ⚠ warning and strictly intercepted from direct sending. Includes adoption indicator for past turns.
 
+> [!NOTE]
+> **Fork & Evolution**: This project is a deeply re-architected, production-hardened fork of [`hiJoeLee/dsh-suggest-actions`](https://github.com/hiJoeLee/dsh-suggest-actions). Built to address real-world security, usability, and resilience challenges, this project introduces a Level 0 deterministic fallback extractor (bilingual), a 6-dimensional MECE high-risk safety gate, zero-token context isolation via `presentationMeta`, reactive turn-isolated storage, adoption state tracking, and full internationalization.
+
 It answers "I've read it, now should it do A or B": instead of composing the sentence yourself, just click it.
+
+## Visual Demo & Workflow
+
+<div align="center">
+  <img src="assets/PixPin_2026-11-12_20-53-55.png" alt="DSH real workflow with safe composer filling" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
+  <p><em>Figure 1: Real workflow — suggestion chips render under the reply; clicking the fill button safely places the full prompt into the composer for manual editing.</em></p>
+</div>
+
+<div align="center">
+  <img src="assets/PixPin_2026-11-12_20-36-59.png" alt="Chips badges and action hierarchy" style="max-width: 600px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
+  <p><em>Figure 2: Badge hierarchy — "Recommended" pick pinned to top; "New Session" for clean context handoffs; equalized button width and dedicated fill triggers.</em></p>
+</div>
+
+## Core Advantages Over Upstream
+
+| Dimension | Upstream (dsh-suggest-actions) | Enhanced (dsh-suggestion-chips) |
+|---|---|---|
+| **Deterministic Fallback** | Relies solely on tool calls; **zero suggestions** if the model just chats | **Level 0 Deterministic Extractor**: instantly parses confirmation sentences, option lists, and engineering conclusions from reply text (Chinese & English) |
+| **Safety Gate** | Clicks execute immediately regardless of command destruction | **6-Dimensional MECE High-Risk Guard**: catches rm -rf, force push, db drops, and dangerous curl/scripts; marks with ⚠ and safely redirects to composer for review |
+| **Token & Overhead** | Early versions echoed suggestions JSON back to context | **Zero Token Cost**: suggestions stay in `presentationMeta` for UI only; `concludeTurn()` finishes turns without extra round-trips |
+| **Turn Isolation** | Flat global memory; page reload or fast turns drop buttons | **Reactive Store by `(sessionId, turn/seq)`**: replay from event stream upon reload, eliminating race conditions and leakage |
+| **Adoption Tracking** | No visual feedback after user interaction | **Adoption Indicator**: marks matched actions as "Adopted" once user submits a prompt |
+| **Badge System** | Basic display | "Recommended" (pinned top), "New Session" (handoff brief), and "Danger" (guarded) badges |
+| **Internationalization** | Primarily Chinese-oriented strings | **Default English UI** + adaptive Chinese detection; complete bilingual documentation |
 
 <img src="assets/turn.en.png" alt="A row of suggestion buttons under a reply: the recommended one is moved to the top, and hovering a button unfolds the sentence that will actually be sent">
 
