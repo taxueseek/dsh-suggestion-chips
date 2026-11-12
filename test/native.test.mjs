@@ -70,7 +70,7 @@ test("模型看到的结果只有一句话，名单走 presentationMeta", () => 
 	assert.equal(rendered.length, 1);
 	assert.doesNotMatch(rendered[0].text, /先看日志/);
 	const meta = tool.output.presentationMeta({ actions: ACTIONS });
-	assert.equal(meta.rev, "0.2.4");
+	assert.equal(meta.rev, "0.2.5");
 	assert.deepEqual(meta.actions.map((a) => a.label), ["先看日志", "跑测试", "先不做"], "推荐置顶、stop 垫底");
 });
 
@@ -455,5 +455,87 @@ test("客户端无 tool/result 时从助手文本消息中水合渲染确定性�
 	currentHook = 0;
 	const rendered = Tail({ sessionId: "s2", turn: turn1 });
 	assert.notEqual(rendered, null, "即使没有 tool/result，也能从消息文本中提取渲染出按钮");
+	assert.equal(rendered.props["data-tool"], "suggest_actions");
+});
+
+test("客户端英文场景水合：无 tool/result 时从英文助手文本渲染按钮", () => {
+	let loadedDef;
+	const effects = [];
+	const stateSlots = [];
+	let currentHook = 0;
+	const FakeReact = {
+		useState(init) {
+			const idx = currentHook++;
+			if (!(idx in stateSlots)) stateSlots[idx] = typeof init === "function" ? init() : init;
+			return [stateSlots[idx], (next) => {
+				stateSlots[idx] = typeof next === "function" ? next(stateSlots[idx]) : next;
+			}];
+		},
+		useEffect(fn) {
+			effects.push(fn);
+		},
+		useRef(val) {
+			return { current: val };
+		},
+		createElement(type, props, ...children) {
+			return { type, props, children };
+		}
+	};
+	const source = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
+	vm.runInNewContext(source, {
+		window: {
+			__ModuleLoader__: { load: (def) => { loadedDef = def; } },
+			setTimeout: () => {},
+			navigator: { language: "en-US" }
+		},
+		document: {
+			documentElement: { lang: "en-US" },
+			createElement: () => ({}),
+			head: { appendChild: () => {} }
+		},
+		console
+	});
+
+	const historyEntries = [
+		{ event: { type: "turn/start", seq: 1, data: { turn: 1 } } },
+		{
+			event: {
+				type: "message", seq: 3,
+				data: {
+					turn: 1,
+					message: {
+						source: { kind: "assistant" },
+						content: [{ type: "text", text: "I've finished the refactor. Should I run the tests?" }]
+					}
+				}
+			}
+		},
+		{ event: { type: "turn/end", seq: 4, data: { turn: 1 } } }
+	];
+	const snapshot = { entries: historyEntries, change: { kind: "replace", entries: historyEntries } };
+	const sessions = {
+		binding: (id) => (id === "s3"
+			? { eventSource: { getSnapshot: () => snapshot, subscribe: () => () => {} } }
+			: undefined)
+	};
+	const registered = new Map();
+	const plugin = loadedDef.factory(() => FakeReact);
+	plugin.apply({
+		effect(fn) { fn(); },
+		get(name) { return name === "sessions" ? sessions : undefined; },
+		slots: {
+			inject(_name, fn) { fn(); },
+			register(spec, Comp) { registered.set(spec.name, Comp); }
+		}
+	});
+
+	const Tail = registered.get("conversation.chat.turnTail");
+	const turn1 = { turn: 1, start: { seq: 1 }, end: { seq: 4 } };
+	currentHook = 0;
+	assert.equal(Tail({ sessionId: "s3", turn: turn1 }), null);
+	for (const fn of effects.splice(0)) fn();
+	currentHook = 0;
+	const rendered = Tail({ sessionId: "s3", turn: turn1 });
+	assert.notEqual(rendered, null, "英文助手文本也要能水合出按钮");
 	assert.equal(rendered.props["data-tool"], "suggest_actions");
 });

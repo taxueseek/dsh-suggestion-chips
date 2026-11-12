@@ -16,7 +16,7 @@ This one takes a different route:
 |---|---|---|
 | Where | inside the composer | **under the reply** (turn tail) |
 | How many | one | **up to 5 by default**, all shown (extra ones fold away only if you raise the cap) |
-| Who decides | the plugin guesses | **the model, from context**, or Level 0 deterministic fallback from text if tool call was omitted |
+| Who decides | the plugin guesses | **the model, from context**, or Level 0 deterministic fallback from text if tool call was omitted (Chinese and English) |
 | Extra cost | **an extra model call** (a separate request to guess) | **zero extra token cost** — presentationMeta isolation, no re-injection into context |
 | To accept | Tab, then Enter | **one click sends it** (dangerous actions safely fill composer first); fill button allows manual edits |
 | If unwanted | ignore it or press Esc | just don't look at it; it never occupies the composer |
@@ -72,7 +72,7 @@ Suggestions without a stance still render (backwards compatible).
 
 - Requires the DSH **0.1.7** line (`conversation.chat.turnTail`, `conversation.input.shell`, `tool.call.toolview`).
 - Button text comes from the model; keep labels under ~20 characters or they look heavy.
-- A click sends immediately, with no confirmation — by design, not by oversight. To review or edit first, use the fill button on the right.
+- Normal suggestions send immediately with no confirmation — by design. High-risk actions are intercepted and safely filled into the composer for review; to edit any suggestion first, use the fill button on the right.
 - Rapid clicks are debounced for ~0.9s.
 
 ## License

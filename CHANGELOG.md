@@ -8,7 +8,24 @@
 
 版本号习惯：新能力也走末位。0.1.2 是加功能，版本只从 0.1.1 走到 0.1.2，没有单独腾一个号段给"新功能"。
 
-**当前状态（2026-11-12）**：已在独立分支 `suggestion-chips` 上更新至 **dsh-suggestion-chips 0.2.4**（中文名「建议胶囊」），基于奥卡姆剃刀与 MECE 原则全面建立六大维度高危操作拦截网与输入框提示联动。45 项单测与宿主冒烟全数通过。
+**当前状态（2026-11-12）**：已在独立分支 `suggestion-chips` 上更新至 **dsh-suggestion-chips 0.2.5**（中文名「建议胶囊」）：0.2.4 建立六大维度高危拦截网与输入框联动，0.2.5 补齐英文场景的确定性提取。49 项单测与宿主冒烟全数通过。
+
+---
+
+## 0.2.5 — 2026-11-12 — 英文场景补全：确定性提取器不再只认中文
+
+**Level 0 提取器补齐英文确认句、英文选项列表与英文工程收尾；中文行为逐字未变，host 与客户端两处实现保持同步。**
+
+### 以前不行、现在能行
+
+- **英文确认句给出英文按钮**：`Should I commit and push?`、`Should I run the tests?`、`Should I continue?`、`Shall I apply this approach?` 分别给出「Commit and push / Show git diff / Don't commit yet」「Run the tests / Skip the tests」「Continue / Pause」「Apply the plan / Don't apply it」。此前英文问句会命中中文正则里的 `commit`、`push` 与问号，反而给出中文按钮。
+- **英文选项列表**：`Plan A: ...` 与 `Option 1: ...` 与中文「方案一：」同构识别；选项正文是纯 ASCII 时，按钮 prompt 用 `Go with option N:`，停止词认 `cancel`、`skip`、`discard`、`abort` 等。
+- **英文工程收尾**：`I've finished the refactor.`、`The refactor is complete.`、`All changes are done.` 给出「Run the tests / Show git diff / Commit the changes」。
+- **中英文分流**：确认句与收尾判断先看整段是不是纯 ASCII，是则走英文分支，混排文本仍按中文处理。
+
+### 验证
+
+- `node --test`：49 项单测全数通过（新增英文确认句、英文选项列表、英文收尾与客户端英文水合四项）。
 
 ---
 

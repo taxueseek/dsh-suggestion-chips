@@ -358,3 +358,46 @@ test("createSuggestionStore：用户发送消息后自动标记对应建议为�
 	assert.equal(updated[0].adopted, true);
 	assert.equal(updated[1].adopted, undefined);
 });
+
+test("extractDeterministicActions：英文确认句提取（提交 / 测试 / 继续 / 采纳）", () => {
+	const e1 = extractDeterministicActions("The changes are ready. Should I commit and push?");
+	assert.equal(e1.length, 3);
+	assert.deepEqual(e1.map((a) => a.label), ["Commit and push", "Show git diff", "Don't commit yet"]);
+	assert.equal(e1[0].recommended, true);
+	assert.equal(e1[2].angle, "stop");
+
+	const e2 = extractDeterministicActions("Tests are written. Should I run the tests?");
+	assert.equal(e2.length, 2);
+	assert.deepEqual(e2.map((a) => a.label), ["Run the tests", "Skip the tests"]);
+
+	const e3 = extractDeterministicActions("Ready to proceed. Should I continue?");
+	assert.equal(e3.length, 2);
+	assert.deepEqual(e3.map((a) => a.label), ["Continue", "Pause"]);
+
+	const e4 = extractDeterministicActions("The plan is ready. Shall I apply this approach?");
+	assert.equal(e4.length, 2);
+	assert.deepEqual(e4.map((a) => a.label), ["Apply the plan", "Don't apply it"]);
+});
+
+test("extractDeterministicActions：英文选项列表与停止词", () => {
+	const text = "Here are the options:\n1. Run the tests\n2. Commit the changes\n3. Discard everything";
+	const actions = extractDeterministicActions(text);
+	assert.equal(actions.length, 3);
+	assert.match(actions[0].label, /^1\.\s*Run the tests/);
+	assert.match(actions[0].prompt, /^Go with option 1:/);
+	assert.equal(actions[0].angle, "standard");
+	assert.equal(actions[2].angle, "stop");
+
+	const planText = "Pick one:\nPlan A: Run the tests\nPlan B: Commit the changes";
+	const planActions = extractDeterministicActions(planText);
+	assert.equal(planActions.length, 2);
+	assert.match(planActions[0].label, /^1\.\s*Run the tests/);
+	assert.match(planActions[1].label, /^2\.\s*Commit the changes/);
+});
+
+test("extractDeterministicActions：英文工程收尾推进", () => {
+	const actions = extractDeterministicActions("I've finished the refactor. All files are updated.");
+	assert.equal(actions.length, 3);
+	assert.deepEqual(actions.map((a) => a.label), ["Run the tests", "Show git diff", "Commit the changes"]);
+	assert.equal(actions[0].recommended, true);
+});

@@ -1,6 +1,6 @@
 {
   "name": "dsh-suggestion-chips",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Clickable suggestion chips under every reply: Level 0 deterministic extraction, high-risk safety gate, adoption indicator, and turn-based isolation.",
   "type": "module",
   "main": "lib/index.js",
