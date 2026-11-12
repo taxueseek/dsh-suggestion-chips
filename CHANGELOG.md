@@ -8,7 +8,7 @@
 
 版本号习惯：新能力也走末位。0.1.2 是加功能，版本只从 0.1.1 走到 0.1.2，没有单独腾一个号段给"新功能"。
 
-**当前状态（2026-11-13）**：已在独立分支 `suggestion-chips` 上更新至 **dsh-suggestion-chips 0.3.0**（中文名「建议胶囊」）：0.3.0 支持建议胶囊与输入框 Tab 幽灵双模态联动，0.3.1 修复幽灵不触发与输入框 placeholder 重影。58 项单测全数通过。
+**当前状态（2026-11-13）**：已在独立分支 `suggestion-chips` 上更新至 **dsh-suggestion-chips 0.3.1**（中文名「建议胶囊」）：0.3.0 支持建议胶囊与输入框 Tab 幽灵双模态联动，0.3.1 修复幽灵不触发、placeholder 重影与 Tab 采纳不落草稿。59 项单测全数通过。
 
 ---
 
@@ -23,7 +23,12 @@
 
 ### 验证
 
-- `node --test`：58 项单测全数通过（新增「新一轮确定性建议不被上一轮显式建议压住」「contenteditable 下幽灵与官方 placeholder 不同时显示」两项回归）。
+- **Tab 采纳真的填进草稿**：旧代码走 `ctx.conversation.input.shell()`，客户端插件上下文上取不到，于是回落成 `textarea.textContent = …`——DSH 输入框是 Lexical 托管的 contenteditable，这么写破坏编辑器状态，表现为「按了 Tab 幽灵消失、草稿还是空的」。现在与「填入输入框」按钮共用同一条 `setDraft` 通路，兜底只写真正的 `textarea`。
+
+### 验证
+
+- `node --test`：59 项单测全数通过（新增「新一轮确定性建议不被上一轮显式建议压住」「contenteditable 下幽灵与官方 placeholder 不同时显示」「Tab 采纳走 setDraft 不改 contenteditable」三项回归）。
+- 实机（web profile，重启后）：幽灵正常显示、官方 placeholder 不再叠字；按 Tab 草稿填入 157 字、幽灵隐藏；清空草稿后幽灵与官方 placeholder 恢复。
 
 ---
 
