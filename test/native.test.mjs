@@ -768,6 +768,30 @@ test("用户发送新消息后上一轮建议在输入框自动过期，防止�
 	assert.equal(history.length, 1, "历史轮次胶囊不受新消息影响");
 });
 
+test("新一轮的确定性建议不被上一轮显式建议压住（建议正确触发）", () => {
+	const store = createSuggestionStore();
+	// 第 1 轮：模型调了工具，建议 seq 10
+	store.remember("s-fresh", {
+		kind: "tool-result",
+		callId: "c1",
+		turn: 1,
+		seq: 10,
+		meta: { displayMode: "both", actions: [{ label: "上一轮工具建议" }] }
+	});
+	// 用户提问 seq 15，助手这一轮没调工具，靠正文提取出确定性建议 seq 20
+	store.rememberUserMessage("s-fresh", 15);
+	store.rememberText("s-fresh", 2, 20, "任务已准备完毕，是否继续执行？");
+
+	const ghost = store.take("s-fresh");
+	assert.equal(ghost.length > 0, true, "新一轮建议必须出现，不能因为上一轮有显式建议就空着");
+	assert.equal(ghost[0].prompt, "继续执行下一步");
+
+	// 历史轮次胶囊仍按 turn 精确取到，不受新鲜度规则影响
+	const history = store.take("s-fresh", 1);
+	assert.equal(history.length, 1);
+	assert.equal(history[0].label, "上一轮工具建议");
+});
+
 test("输入框幽灵展示时让出原生placeholder，隐藏时无缝恢复", () => {
 	let loadedDef = null;
 	const FakeReact = {
@@ -898,4 +922,121 @@ test("输入框幽灵展示时让出原生placeholder，隐藏时无缝恢复", 
 	// 验证 placeholder 恢复
 	assert.equal(textarea.placeholder, "发消息或倒退里程碑...", "隐藏幽灵后原生 placeholder 必须恢复");
 	assert.equal(textarea.hasAttribute("data-dsh-prev-ph"), false);
+});
+
+test("contenteditable 输入框：幽灵与官方 placeholder 不同时显示（不重影）", () => {
+	let loadedDef = null;
+	let tick = null;
+	const source = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
+
+	class FakeEl {
+		constructor(tagName) {
+			this.tagName = tagName;
+			this.style = {};
+			this.attributes = new Map();
+			this.children = [];
+			this.textContent = "";
+			this.value = "";
+			this.parentElement = null;
+			this.isConnected = true;
+		}
+		setAttribute(k, v) { this.attributes.set(k, String(v)); }
+		getAttribute(k) { return this.attributes.get(k) ?? null; }
+		hasAttribute(k) { return this.attributes.has(k); }
+		removeAttribute(k) { this.attributes.delete(k); }
+		get dataset() { return { placeholder: this.attributes.get("data-placeholder") }; }
+		appendChild(child) { child.parentElement = this; this.children.push(child); return child; }
+		closest() { return this.parentElement; }
+		querySelector(sel) {
+			const want = sel.replace(/[[\]]/g, "");
+			const walk = (el) => {
+				for (const c of el.children ?? []) {
+					if (c.attributes?.has(want)) return c;
+					const hit = walk(c);
+					if (hit) return hit;
+				}
+				return null;
+			};
+			return walk(this);
+		}
+		addEventListener() {}
+		removeEventListener() {}
+	}
+
+	// 真实结构：div[data-input-scroll] > div[data-composer-input][data-placeholder]
+	//                                  + div[data-composer-placeholder]
+	const scroll = new FakeEl("div");
+	scroll.setAttribute("data-input-scroll", "true");
+	const editable = new FakeEl("div");
+	editable.setAttribute("data-composer-input", "true");
+	editable.setAttribute("data-placeholder", "发消息或倒退里程碑...");
+	scroll.appendChild(editable);
+	const official = new FakeEl("div");
+	official.setAttribute("data-composer-placeholder", "true");
+	official.textContent = "发消息或倒退里程碑...";
+	scroll.appendChild(official);
+
+	const sandbox = {
+		window: {
+			__ModuleLoader__: { load(def) { loadedDef = def; } },
+			setTimeout: () => {},
+			navigator: { language: "zh-CN" },
+			getComputedStyle: () => ({ paddingTop: "8px", paddingLeft: "12px", font: "14px sans-serif" }),
+			addEventListener: () => {},
+			removeEventListener: () => {}
+		},
+		document: {
+			documentElement: { lang: "zh-CN" },
+			querySelector: (sel) => (sel.includes("data-composer-input") ? editable : null),
+			createElement: (tag) => new FakeEl(tag),
+			createTextNode: (t) => ({ text: t }),
+			head: { appendChild: () => {} }
+		},
+		setInterval: (fn) => { tick = fn; return 1; },
+		clearInterval: () => {},
+		console
+	};
+	vm.runInNewContext(source, sandbox);
+
+	const mockReact = {
+		useState(initial) { return [typeof initial === "function" ? initial() : initial, () => {}]; },
+		useEffect() {},
+		useRef() { return { current: null }; },
+		createElement(type, props, ...children) { return { type, props, children }; }
+	};
+	const registered = new Map();
+	const ctx = {
+		effect() {},
+		get(name) {
+			if (name === "sessions") {
+				return {
+					list: {
+						getSnapshot: () => ({ current: { id: "sess-ce" }, byId: { "sess-ce": { running: false } } }),
+						subscribe: () => () => {}
+					}
+				};
+			}
+			return undefined;
+		},
+		slots: { inject(_n, fn) { fn(); }, register(spec, Comp) { registered.set(spec.name, Comp); } }
+	};
+	loadedDef.factory(() => mockReact).apply(ctx);
+
+	const Capture = registered.get("tool.call.toolview");
+	Capture({
+		sessionId: "sess-ce",
+		block: { kind: "tool-result", meta: { actions: [{ label: "采纳方案并执行", prompt: "采纳该方案，请直接执行", recommended: true }] } }
+	});
+
+	tick();
+	const overlay = scroll.children.find((c) => c.className === "dsh-suggest-ghost-overlay");
+	assert.ok(overlay, "幽灵浮层已创建");
+	assert.equal(overlay.style.display, "inline-flex", "幽灵处于显示状态");
+	// 关键回归：官方那一行必须被让开，否则与幽灵叠成截图里的重影
+	assert.equal(official.style.visibility, "hidden", "显示幽灵时必须隐藏官方 placeholder 节点");
+
+	editable.textContent = "我正在输入";
+	tick();
+	assert.notEqual(official.style.visibility, "hidden", "隐藏幽灵后官方 placeholder 恢复可见");
+	assert.equal(overlay.style.display, "none", "幽灵已隐藏");
 });
