@@ -70,7 +70,7 @@ test("模型看到的结果只有一句话，名单走 presentationMeta", () => 
 	assert.equal(rendered.length, 1);
 	assert.doesNotMatch(rendered[0].text, /先看日志/);
 	const meta = tool.output.presentationMeta({ actions: ACTIONS });
-	assert.equal(meta.rev, "0.2.2");
+	assert.equal(meta.rev, "0.2.3");
 	assert.deepEqual(meta.actions.map((a) => a.label), ["先看日志", "跑测试", "先不做"], "推荐置顶、stop 垫底");
 });
 
@@ -194,9 +194,9 @@ test("客户端 bundle：仅注册 toolview 与 turnTail 两个槽位，晚到�
 	};
 	const source = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
 	vm.runInNewContext(source, sandbox);
-	assert.equal(loadedDef.id, "dsh-suggest-actions");
+	assert.equal(loadedDef.id, "dsh-action-chips");
 	const plugin = loadedDef.factory(() => FakeReact);
-	assert.equal(plugin.name, "dsh-suggest-actions");
+	assert.equal(plugin.name, "dsh-action-chips");
 	assert.deepEqual(Array.from(plugin.inject), ["slots", "sessions"]);
 
 	const registered = new Map();

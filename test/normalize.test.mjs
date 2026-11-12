@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractDeterministicActions, normalizeActions } from "../lib/normalize.js";
+import { createSuggestionStore, extractDeterministicActions, isDangerousAction, normalizeActions } from "../lib/normalize.js";
 
 test("正常输入：原样保留，顺序不变", () => {
 	assert.deepEqual(
@@ -257,4 +257,50 @@ test("extractDeterministicActions：工程收尾推进（无问句时建议验�
 test("extractDeterministicActions：开放式闲聊或普通回答克制不弹按钮", () => {
 	assert.deepEqual(extractDeterministicActions("这是一个用于处理数据的工具函数。"), []);
 	assert.deepEqual(extractDeterministicActions("你觉得为什么会有这个性能瓶颈？"), []);
+});
+
+test("isDangerousAction：危险操作识别与 danger 字段注入", () => {
+	assert.equal(isDangerousAction({ label: "运行单测" }), false);
+	assert.equal(isDangerousAction({ label: "强制覆盖文件" }), true);
+	assert.equal(isDangerousAction({ label: "执行清理", prompt: "rm -rf /tmp/data" }), true);
+	assert.equal(isDangerousAction({ label: "强制推送", prompt: "git push --force origin main" }), true);
+	assert.equal(isDangerousAction({ label: "删除库", prompt: "drop table users" }), true);
+	assert.equal(isDangerousAction({ label: "普通操作", danger: true }), true);
+
+	const normalized = normalizeActions([
+		{ label: "强制覆盖目标目录", prompt: "rm -rf build && npm run build" },
+		{ label: "正常查看状态", prompt: "git status" }
+	]);
+	assert.equal(normalized[0].danger, true);
+	assert.equal(normalized[1].danger, undefined);
+});
+
+test("createSuggestionStore：用户发送消息后自动标记对应建议为已采纳（adopted: true）", () => {
+	const store = createSuggestionStore();
+	store.remember("s1", {
+		kind: "tool-result",
+		callId: "c1",
+		turn: 1,
+		seq: 10,
+		meta: {
+			actions: [
+				{ label: "运行测试", prompt: "跑测试验证" },
+				{ label: "查看 diff", prompt: "查看 git diff" }
+			]
+		}
+	}, "c1");
+
+	// 初始状态：均未采纳
+	const initial = store.take("s1", { turn: 1 });
+	assert.equal(initial.length, 2);
+	assert.equal(initial[0].adopted, undefined);
+	assert.equal(initial[1].adopted, undefined);
+
+	// 用户在后续回合发送了 "跑测试验证"
+	store.rememberUserText("s1", "跑测试验证");
+
+	// 再次获取：匹配到的建议自动带上 adopted: true 闭环标记
+	const updated = store.take("s1", { turn: 1 });
+	assert.equal(updated[0].adopted, true);
+	assert.equal(updated[1].adopted, undefined);
 });

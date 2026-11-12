@@ -1,7 +1,7 @@
 {
-  "name": "dsh-suggest-actions",
-  "version": "0.2.2",
-  "description": "在每条回复下方给出可点的下一步建议，点一下就作为你的消息发出去。Clickable next-step suggestions under every reply; one click sends that sentence as your message.",
+  "name": "dsh-action-chips",
+  "version": "0.2.3",
+  "description": "DeepSeek Harness 回复尾部动作胶囊（Action Chips）：内置 Level 0 确定性提取、高危动作预警与安全回填、采纳闭环、按轮次响应式隔离与回放。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -23,6 +23,7 @@
     "dsh-plugin",
     "deepseek-harness",
     "dsh",
+    "action-chips",
     "suggestions",
     "quick-actions",
     "ui"
