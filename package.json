@@ -2,6 +2,7 @@
   "name": "dsh-suggestion-chips",
   "version": "0.2.5",
   "description": "Clickable suggestion chips under every reply: Level 0 deterministic extraction, high-risk safety gate, adoption indicator, and turn-based isolation.",
+  "author": "taxueseek",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -16,13 +17,14 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
-    "README.en.md",
+    "README.zh.md",
     "LICENSE"
   ],
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",
     "dsh",
+    "cordis",
     "suggestion-chips",
     "suggestions",
     "chips",
@@ -54,11 +56,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hiJoeLee/dsh-suggest-actions.git"
+    "url": "git+https://github.com/taxueseek/dsh-suggestion-chips.git"
   },
-  "homepage": "https://github.com/hiJoeLee/dsh-suggest-actions#readme",
+  "homepage": "https://github.com/taxueseek/dsh-suggestion-chips#readme",
   "bugs": {
-    "url": "https://github.com/hiJoeLee/dsh-suggest-actions/issues"
+    "url": "https://github.com/taxueseek/dsh-suggestion-chips/issues"
   },
   "scripts": {
     "test": "node --test"

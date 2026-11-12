@@ -1,137 +1,84 @@
-# dsh-suggestion-chips（建议胶囊）
+# dsh-suggestion-chips
 
-<img src="assets/icon.svg" width="96" alt="图标">
+[English](README.md) | [中文文档](README.zh.md)
 
-给 DeepSeek Harness 的每条回复末尾加一排**可点的建议胶囊（Suggestion Chips）**。点一下，那句话就直接作为你的消息发出去——不用自己打。每条建议右侧还有一个小按钮（输入框图标）：点它只把这句话**放进输入框**，你改完再发。针对破坏性高危操作自动提供 ⚠ 警示并强制拦截一键直发，支持历史轮次采纳闭环状态指示。
+<img src="assets/icon.svg" width="96" alt="Icon">
 
-它解决的是"我读完了，接下来想让它干 A 还是 B"这件事：与其自己组织语言，不如直接点。
+Clickable **suggestion chips** under every reply in DeepSeek Harness. One click sends that text as your message — no typing. Each suggestion also has a small fill button on its right: it only puts that sentence into the composer, so you can edit it before sending. Destructive high-risk actions are marked with ⚠ warning and strictly intercepted from direct sending. Includes adoption indicator for past turns.
 
-<img src="assets/turn.zh.png" alt="回复下方的一排建议按钮：标了「推荐」的那条排在最前，把鼠标停在其中一条上会展开显示点下去真正发出去的那句话">
+It answers "I've read it, now should it do A or B": instead of composing the sentence yourself, just click it.
 
-## 和"输入框补全"不是一回事
+<img src="assets/turn.en.png" alt="A row of suggestion buttons under a reply: the recommended one is moved to the top, and hovering a button unfolds the sentence that will actually be sent">
 
-生态里已经有几个"下一句建议"插件（`dsh-suggest-prompt`、`dsh-prompt-for-me`、`dsh-suggest-ghost`、`dsh-input-assist`），它们都是**输入框里的 ghost text**：靠**另跑一次模型调用**去猜你要说什么，给一条，按 Tab 采纳，**然后还要自己按回车**。
+## Not the same thing as "composer completion"
 
-这个插件换了个思路：
+There are already a few "next sentence" plugins (`dsh-suggest-prompt`, `dsh-prompt-for-me`, `dsh-suggest-ghost`, `dsh-input-assist`). They all live **inside the composer** as ghost text: they fire an **extra model call** to guess what you would say, offer one line, you accept with Tab, then **press Enter yourself**.
 
-|  | 输入框补全类 | 本插件（dsh-suggestion-chips） |
+This one takes a different route:
+
+|  | Composer completion | This plugin (dsh-suggestion-chips) |
 |---|---|---|
-| 位置 | 输入框内 | **回复下方**（轮次尾部） |
-| 条数 | 1 条 | **默认最多 5 条**，直接铺开（上限调更高时多出的会自动折叠） |
-| 内容来源 | 插件猜你想说什么 | **模型按上下文主动给**，若未调用则由内置 Level 0 确定性提取器秒级从正文兜底（中英场景都认） |
-| 额外开销 | 要多跑一次模型调用（另起一次请求去猜） | **不额外调用**——0 额外 Token 消耗，名单走 `presentationMeta` 不回灌上下文 |
-| 采纳 | Tab，再自己按回车 | **点一下就发出**（高危操作自动降级为安全填入）；想先改再发点右侧填入按钮 |
-| 不想要它 | 得忽略或按 Esc | 不看就行，它不占输入框 |
+| Where | inside the composer | **under the reply** (turn tail) |
+| How many | one | **up to 5 by default**, all shown (extra ones fold away only if you raise the cap) |
+| Who decides | the plugin guesses | **the model, from context**, or Level 0 deterministic fallback from text if tool call was omitted (Chinese and English) |
+| Extra cost | **an extra model call** (a separate request to guess) | **zero extra token cost** — presentationMeta isolation, no re-injection into context |
+| To accept | Tab, then Enter | **one click sends it** (dangerous actions safely fill composer first); fill button allows manual edits |
+| If unwanted | ignore it or press Esc | just don't look at it; it never occupies the composer |
 
-## 安装
+## Install
 
 ```bash
 dsh plugin --profile desktop add dsh-suggestion-chips
 ```
 
-装完**重启 DSH 并刷新一次页面**——host 只在启动时读插件清单，客户端代码也要重新加载。这两步缺一不可（踩过）。
+Then **restart DSH and reload the page** — the host reads its plugin list only at startup, and the client bundle has to be re-fetched. Both steps matter.
 
-## 它怎么工作
+## How it works
 
-- **Host 侧**：注册一个 `suggest_actions` 工具。模型写完回复后调用一次，参数里带 1-5 条建议；工具立刻返回并**直接结束这一轮**（宿主的 `concludeTurn()`，可通过 `config.concludeTurn: false` 关闭），不再多跑一步模型。
-- **客户端侧**画两处：
-  - `tool.call.toolview` 挂一个**静默采集器**：渲染时按 `(sessionId, turn / seq)` 把建议记进插件实例内存，并通过订阅通知轮次尾部，自己不画任何东西；
-  - `conversation.chat.turnTail`（轮次尾部）挂**展示器**：按当前轮次的 `turn`（或事件 `seq` 区间）读取并订阅建议、画按钮，不同轮次之间互不串轮。
-- **为什么放轮次尾部**：DSH 的"过程组折叠"会把思考与工具调用收成一行，画在工具卡片里的东西默认看不见；轮次尾部在折叠范围之外，所以过程收起来按钮照样露着（这条是读了官方源码才定的，见下）。
-- **点按钮**走的是 `conversation.input.shell(sessionId).actions`：写进会话输入框 → 提交。和用户自己敲键盘回车是同一条路。
+- **Host side**: registers a non-blocking `suggest_actions` tool. It returns immediately — the model calls it once to close a turn, passing 2-5 suggestions.
+- **Client side** draws in two places:
+  - a *silent collector* on `tool.call.toolview` — records the suggestions into plugin memory and renders nothing;
+  - a *renderer* on `conversation.chat.turnTail` — reads that memory and draws the buttons.
+- **Why the turn tail**: DSH folds "process" (thinking + tool calls) into a single collapsed line, so anything drawn inside a tool card is hidden by default. The turn tail sits outside that folding, so the buttons stay visible even when the process is collapsed.
+- **Clicking** goes through `conversation.input.shell(sessionId).actions` (set draft → submit) — the exact same path as typing the sentence and pressing Enter.
 
-## 省 token 与原生化（0.2.0）
+## Stances and the recommended pick
 
-| | 0.1.14 | 0.2.0 |
-|---|---|---|
-| 工具说明（每次请求都带） | 3,822 字符，约 956 token（DSH 计量器记的是 969） | 1,465 字符，约 366 token |
-| 工具结果（留在上下文里） | 一句话 + 整份建议名单的 JSON | 一句话（`3 suggestion(s) shown under your reply.`） |
-| 调用之后 | 模型还要再跑一步才收尾 | 这一轮在这一步结束（`concludeTurn`） |
-| 子 agent | 也声明这个工具 | 不声明（会话头 `origin: subagent` 时跳过） |
-| 客户端状态 | 模块级单槽 `Map(sessionId)`，无订阅，多轮偶发串轮 | `apply(ctx)` 托管按轮次 `(sessionId, turn / seq)` 响应式存储，`ctx.effect` 卸载清理 |
+Two things were added on top of a plain list of sentences.
 
-名单还在，只是换了条路：走 `output.presentationMeta`，随会话日志落盘、只给界面读，模型看不见。说明也补上了「什么时候别给」：任务做完、或卡在只有用户能拍板的选择上才给；能自己做的先做完；计划模式里不给（点按钮只算口头同意，替代不了计划审批）。
+**Stance.** Every suggestion carries one, and there are five: cautious (a smaller step — confirm before going further), standard (the normal next move along the current route), bold (same route, pushed faster and with more risk taken), alternative (the current approach is dropped), stop (this need not be done at all). A stance appears at most once per turn — repeats are dropped and the free slots go to other angles, so three suggestions that are really the same move never reach you. Five is the maximum (one per stance); when only two are worth offering, you get two.
 
-## 建议的「立场」和「推荐」
+The stance is **not drawn on the button**: it is a format constraint on the model. That is the point — telling a model "please offer different angles" is advice it can ignore, whereas a required field cannot be ignored.
 
-这一轮加了两样东西：一个管"几条建议别是同一个角度"，一个管"哪条最该先做"。
+**Pick.** The model marks the one it would do first, independently of its position in the list — the marked entry is moved to the top and carries a small badge. Its background is the same as the other buttons; only hovering darkens it, like every other button. A `stop` entry ("this need not be done") is pushed to the bottom wherever it was given; the rest keep the order you gave. When the options are genuinely interchangeable, nothing is marked.
 
-**立场**：每条建议背后都要标一个立场，五档——先验证（更小的一步，先确认再往下）、常规推进（顺这条路的正常下一步）、更用力（还是这条路，但更快、更敢冒险）、换一条路（当前做法不走了）、可以不做（这事本身不必做）。同一轮里一个立场只能出现一次，重复的直接丢掉，空出的位置留给别的角度——所以"三条其实是一回事"这种列表到不了你面前。最多五条（五档立场各一条）；只想到两条时就给两条，不硬凑。
+**Hover a button** (or focus it with the keyboard) and it unfolds in place, showing the sentence that will actually be sent; move away and it folds back. The point is to keep "what you see" and "what gets sent" aligned — the label is a summary, and the sentence actually sent is usually longer. That sentence lives **outside the button** (a sibling element), so clicking it never sends anything — select and copy as you like.
 
-立场**不会显示在按钮上**，它是给模型定的格式约束。为什么不在提示里嘱咐一句"请给不同角度的建议"就算了：嘱咐是可以不听的，格式约束绕不过去。
+**All buttons share one width**, sized by the longest label rather than each one's own content: the arrows line up in a column, and a long instruction no longer stretches its button.
 
-**推荐**：哪条最该先做，由模型单独标出来，跟它排在第几位无关——标了的那条会被自动提到第一位，旁边挂一个「推荐」小标签。它的底色和别的按钮一样，只有鼠标停在上面时才变深一点。反过来，「可以不做」那条不管给在第几位，都会被压到最后；其余几条保持模型给的顺序。几条确实差不多时，也可以一个都不标。
+**A fill button sits to the right of every suggestion (since 0.1.11; input-field icon).** Clicking it does **not** send: it clears the composer, drops the sentence in, and returns the caret — edit a few words, then press Enter. Use it when the suggestion is roughly right but the wording is not.
 
-**把鼠标停在按钮上**（键盘操作是聚焦到它），按钮会就地展开，显示点下去真正会发出去的那句话；移开就收回去。这一步是为了让"看到的"和"发出去的"对得上——按钮上是摘要，真正发出去的那句常常更长。这段全文**长在按钮外面**，所以展开之后点它不会误发，想选中文字复制随便点。
+**All shown by default**: the per-turn cap is 5 (one per stance), and all of them render at once. The folding code is still there, but its threshold (5) equals the cap, so it normally never fires; raise the cap to 6 and the extra entry folds into a single "N more" line that unfolds in place when clicked — the unfolded ones are clickable too. The unfolded state is deliberately not remembered — scroll away and come back, and it is collapsed again.
 
-**几条按钮一样宽**：宽度按最长的那条标签定，不按各自内容伸缩——箭头排成一列好扫读，指令写得长也不会把按钮撑开。
+The few words the plugin draws itself ("Recommended", "N more", "Show less") follow the interface language: Chinese in a Chinese UI, English otherwise.
 
-**每条右侧有个填入按钮（0.1.11 起，输入框图标）**：点它**不发送**，只把这句话放进输入框、把光标叫回来，你可以先改几个字再按回车。它处理的是"这句话大方向对、但我想换个说法"的情况。**放进去之前会先清空输入框**——点一下就是"用这句重新开始"，不会跟上一次的草稿混在一起。
+Suggestions without a stance still render (backwards compatible).
 
-**默认全部铺开**：单轮上限就是立场档数（5 条），界面上一次全显示。折叠那段逻辑还留着，但阈值（5）与上限相等，正常情况下不会触发；把上限配到 6 时，多出来的那条会自动收进下面一行"还有 N 条"里，点开就地铺开、展开后照样能点。展开状态不记忆——翻回去再回来，它又是收起的。
+## Leaner and more native (0.2.0)
 
-界面上的几个字（「推荐」「还有 N 条」「收起」）跟着界面语言走：中文界面显示中文，其它语言显示英文。
+- **Tool schema 3,822 → 1,465 chars** (≈956 → ≈366 tokens, sent on every request). Each rule is stated once, and the description now says *when not to call*: only when the task is done or blocked on a user-only choice, do doable steps first, never in plan mode.
+- **The model sees one sentence.** The suggestion list travels through `output.presentationMeta` (persisted with the session log, read by the UI only) instead of being echoed back as JSON.
+- **The turn ends at the call** via the host's `concludeTurn()` (configurable via `config.concludeTurn`, default `true`), saving one model round-trip per turn. Subagent sessions do not declare the tool.
+- **Per-turn reactive store owned by `apply(ctx)`**: suggestions are indexed by `(sessionId, turn / seq)` with subscriber notifications and cleaned up via `ctx.effect`, preventing cross-turn duplication and mount-order races while keeping the package strictly focused on turn-tail action buttons.
+- Old hosts fall back gracefully (one extra step, global declaration); 0.1.x sessions still render their buttons.
 
-不带立场的建议照常显示（向后兼容）。
+## Limits
 
-## 「开新会话」按钮
+- Requires the DSH **0.1.7** line (`conversation.chat.turnTail`, `conversation.input.shell`, `tool.call.toolview`).
+- Button text comes from the model; keep labels under ~20 characters or they look heavy.
+- Normal suggestions send immediately with no confirmation — by design. High-risk actions are intercepted and safely filled into the composer for review; to edit any suggestion first, use the fill button on the right.
+- Rapid clicks are debounced for ~0.9s.
 
-会话长到该断的时候，与其自己复制结论、手动新建会话、再粘贴过去，不如给一条带 `opensNewSession: true` 的建议：点一下，新建会话（落在同一个工作目录）→ 切过去 → 把这段文本放进新会话的输入框。
-
-- **只填草稿，不自动发送**。自动发送会立刻起一轮模型调用，等于替用户花钱；填进输入框，用户还能补一句再回车。
-- **一个会话只保留一条**这类建议，给多了也只会剩第一条。
-- 按钮上带一个「新会话」小标签，和普通建议区分开。
-- 失败会在按钮下方说明原因（会话服务没起来、切不到前台、输入框一直没准备好），不会静默。
-
-**和官方「派生会话」（fork）不是一回事**：fork 复制的是整段历史前缀，新会话的上下文和原来一样长，省不下 token；这条带过去的只有你写的那段文字。要接着原样跑就用 fork，要省 token 就用它。
-
----
-
-## 已知限制
-
-- 需要 DSH **0.1.7** 这一线（用到了 `conversation.chat.turnTail`、`conversation.input.shell`、`tool.call.toolview`）。「调用即收尾」「子 agent 不声明」「名单走 presentationMeta」用的是 0.2.2 的宿主接口；旧宿主上前两条自动退回旧行为（多跑一步、全局声明）。
-- 0.1.x 产生的旧会话翻回去照样有按钮：界面先读 `meta`，读不到再从结果正文里找名单。刷新页面后也一样（0.2.1 起会从会话事件流回放名单，不再依赖那个会话的工具有没有被渲染过）。
-- 模型没调用 `suggest_actions` 时，内置 Level 0 提取器会从正文里兜底：编号选项、确认型问句、工程收尾三种模式，中英场景都认。模型有权不给（做完的事、卡在只有用户能拍板时该给，中间步骤不给），所以「这一轮没有按钮」本身不是故障。
-- 按钮文字由模型给：太长会显得笨重，建议每条不超过 20 字。
-- 普通建议点击**直接发送**，没有二次确认——这是设计意图。高危动作会被拦截，自动降级为填入输入框，核对后手动发送；想先改再发，点右侧的填入按钮。
-- 一次点击有约 0.9 秒的防连点。
-
-## 开发者备注
-
-实现细节、踩过的坑、以及"为什么不用另外三个位置"都在仓库注释里；`conversation.chat.turnTail` 这个落点是从官方 72 个 slot 扩展点里筛出来的。
-
-## 许可
+## License
 
 MIT
-
-## 配置
-
-改单轮上限，**别写在 profile 的 `cordis.patch.yml` 里**——那份 patch 先于插件的插入行应用，同 id 的行这时还不存在，会被静默忽略（2026-09-26 在另一个插件上实测过）。正确的位置是插件自己的 bundle patch：
-
-```yaml
-- insert:
-    - id: suggestion-chips
-      name: 'dsh-suggestion-chips'
-      config:
-        maxActions: 2     # 单轮最多给几条（1–6），超出的丢掉；界面就按这个数显示
-        concludeTurn: true # 默认为 true（调用即结束本轮）；若需保留该轮分支按钮或避免仅保留最终回复模式下被折叠，可设为 false
-```
-
-不写 `config` 时 `maxActions` 用默认值 5（等于立场档数），`concludeTurn` 用默认值 `true`。改完要重启一次 DSH——配置在启动时读。
-
-> 2026-09-29 修正：默认值原来是 3，而界面折叠阈值也是 3——两级上限一样，"还有 N 条"永远没东西可展开，模型给出的第四、五个不同动作在 host 侧就被砍了。现在默认 5，折叠那行才真正用得上。
-
-## 开发
-
-```bash
-pnpm test      # 49 个单测，零外部依赖（node:test）
-```
-
-代码分工：
-
-- `lib/normalize.js` —— 清洗规则、工具说明与按轮次响应式存储（空白、去重、立场、排序、上限、`readHostActions`、`createSuggestionStore`），纯函数、可单测
-- `lib/index.js` —— 注册工具、读配置（严格遵守 DSH 函数插件 4 导出契约：`Config`、`apply`、`inject`、`name`）；清洗后的名单经 `presentationMeta` 交给界面，模型只拿一句话
-- `lib/client.js` —— 浏览器侧。由 `apply(ctx)` 持有按 `(sessionId, turn / seq)` 索引的响应式存储并在 `ctx.effect` 卸载时清理，把 host 交回来的名单按轮次记下来、画出来，规则一条都不重复
-- `test/native.test.mjs` —— 0.2.0 的原生化回归：4 导出契约、说明长度、只回一句话、`concludeTurn` 开关、子 agent 不声明、旧日志兜底、按轮次存储与客户端槽位生命周期
-
-边界行为都有测试锁定：非数组、坏 JSON、空白 label、重复 label、重复立场、非法立场、超限条数、`maxActions` 越界。UI 侧另有：按钮最多 520px 宽、文案最多两行（悬停显示全文）、点击后 0.9 秒防连点、标了"推荐"的那条会高亮、右侧填入按钮只填草稿不发送（填入前先清空原有草稿）。多轮会话按 `turn`（或事件 `seq` 区间）精确对应各自的建议，互不串轮。
