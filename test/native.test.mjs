@@ -194,9 +194,9 @@ test("客户端 bundle：仅注册 toolview 与 turnTail 两个槽位，晚到�
 	};
 	const source = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
 	vm.runInNewContext(source, sandbox);
-	assert.equal(loadedDef.id, "dsh-action-chips");
+	assert.equal(loadedDef.id, "dsh-suggestion-chips");
 	const plugin = loadedDef.factory(() => FakeReact);
-	assert.equal(plugin.name, "dsh-action-chips");
+	assert.equal(plugin.name, "dsh-suggestion-chips");
 	assert.deepEqual(Array.from(plugin.inject), ["slots", "sessions"]);
 
 	const registered = new Map();

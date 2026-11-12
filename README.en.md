@@ -1,6 +1,6 @@
-# dsh-suggest-actions
+# dsh-suggestion-chips
 
-Clickable **next-step suggestions** under every reply in DeepSeek Harness. One click sends that text as your message — no typing. Each suggestion also has a small fill button on its right: it only puts that sentence into the composer, so you can edit it before sending.
+Clickable **suggestion chips** under every reply in DeepSeek Harness. One click sends that text as your message — no typing. Each suggestion also has a small fill button on its right: it only puts that sentence into the composer, so you can edit it before sending. Destructive high-risk actions are marked with ⚠ warning and strictly intercepted from direct sending. Includes adoption indicator for past turns.
 
 It answers "I've read it, now should it do A or B": instead of composing the sentence yourself, just click it.
 
@@ -12,19 +12,19 @@ There are already a few "next sentence" plugins (`dsh-suggest-prompt`, `dsh-prom
 
 This one takes a different route:
 
-|  | Composer completion | This plugin |
+|  | Composer completion | This plugin (dsh-suggestion-chips) |
 |---|---|---|
 | Where | inside the composer | **under the reply** (turn tail) |
 | How many | one | **up to 5 by default**, all shown (extra ones fold away only if you raise the cap) |
-| Who decides | the plugin guesses | **the model, from context** — it can offer "restart DSH so the buttons take effect", which a guesser cannot |
-| Extra cost | **an extra model call** (a separate request to guess) | **no extra call** — the suggestions ride along as the main model closes its turn |
-| To accept | Tab, then Enter | **one click sends it**; the small button on the right fills the composer so you can edit first |
+| Who decides | the plugin guesses | **the model, from context**, or Level 0 deterministic fallback from text if tool call was omitted |
+| Extra cost | **an extra model call** (a separate request to guess) | **zero extra token cost** — presentationMeta isolation, no re-injection into context |
+| To accept | Tab, then Enter | **one click sends it** (dangerous actions safely fill composer first); fill button allows manual edits |
 | If unwanted | ignore it or press Esc | just don't look at it; it never occupies the composer |
 
 ## Install
 
 ```bash
-dsh plugin --profile desktop add dsh-suggest-actions
+dsh plugin --profile desktop add dsh-suggestion-chips
 ```
 
 Then **restart DSH and reload the page** — the host reads its plugin list only at startup, and the client bundle has to be re-fetched. Both steps matter.

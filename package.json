@@ -1,7 +1,7 @@
 {
-  "name": "dsh-action-chips",
+  "name": "dsh-suggestion-chips",
   "version": "0.2.3",
-  "description": "DeepSeek Harness 回复尾部动作胶囊（Action Chips）：内置 Level 0 确定性提取、高危动作预警与安全回填、采纳闭环、按轮次响应式隔离与回放。",
+  "description": "Clickable suggestion chips under every reply: Level 0 deterministic extraction, high-risk safety gate, adoption indicator, and turn-based isolation.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -23,9 +23,9 @@
     "dsh-plugin",
     "deepseek-harness",
     "dsh",
-    "action-chips",
+    "suggestion-chips",
     "suggestions",
-    "quick-actions",
+    "chips",
     "ui"
   ],
   "license": "MIT",
