@@ -737,3 +737,165 @@ test("客户端水合支持 DSH 真实事件类型 assistant/message 与 user/me
 	const rendered = Tail({ sessionId: "sess-real", turn: { turn: 1 } });
 	assert.notEqual(rendered, null, "成功识别 assistant/message 并水合渲染按钮");
 });
+
+test("用户发送新消息后上一轮建议在输入框自动过期，防止幽灵串味", () => {
+	const store = createSuggestionStore();
+	store.remember("s-expire", {
+		kind: "tool-result",
+		callId: "c1",
+		turn: 1,
+		seq: 3,
+		meta: {
+			displayMode: "both",
+			actions: [{ label: "第一轮建议", prompt: "推进第一步" }]
+		}
+	});
+
+	// 在未发新消息时，输入框能获取到本轮最新建议
+	const before = store.take("s-expire");
+	assert.equal(before.length, 1);
+	assert.equal(before[0].label, "第一轮建议");
+
+	// 用户在 seq: 5 发送了新消息（新轮次开始）
+	store.rememberUserMessage("s-expire", 5);
+
+	// 此时新一轮模型尚未产生新建议，输入框必须返回空，杜绝旧建议幽灵冒出
+	const after = store.take("s-expire");
+	assert.deepEqual(after, [], "用户发送新提问后旧建议已失效，输入框不可展示幽灵");
+
+	// 但历史轮次的尾部胶囊仍能按 turn 精确查到
+	const history = store.take("s-expire", 1);
+	assert.equal(history.length, 1, "历史轮次胶囊不受新消息影响");
+});
+
+test("输入框幽灵展示时让出原生placeholder，隐藏时无缝恢复", () => {
+	let loadedDef = null;
+	const FakeReact = {
+		useState(initial) { return [typeof initial === "function" ? initial() : initial, () => {}]; },
+		useEffect() {},
+		useRef() { return { current: null }; },
+		createElement(type, props, ...children) { return { type, props, children }; }
+	};
+	const source = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
+
+	class FakeElement {
+		constructor(tagName) {
+			this.tagName = tagName;
+			this.style = {};
+			this.attributes = new Map();
+			this.children = [];
+			this.value = "";
+			this.placeholder = "";
+			this.parentElement = null;
+			this.isConnected = true;
+		}
+		setAttribute(k, v) { this.attributes.set(k, String(v)); }
+		getAttribute(k) { return this.attributes.get(k); }
+		hasAttribute(k) { return this.attributes.has(k); }
+		removeAttribute(k) { this.attributes.delete(k); }
+		appendChild(child) {
+			child.parentElement = this;
+			this.children.push(child);
+			return child;
+		}
+		closest() { return this.parentElement; }
+		addEventListener() {}
+		removeEventListener() {}
+	}
+
+	const parentEl = new FakeElement("div");
+	const textarea = new FakeElement("textarea");
+	textarea.placeholder = "发消息或倒退里程碑...";
+	parentEl.appendChild(textarea);
+
+	const sandbox = {
+		window: {
+			__ModuleLoader__: { load(def) { loadedDef = def; } },
+			setTimeout: () => {},
+			navigator: { language: "zh-CN" },
+			getComputedStyle: () => ({ paddingTop: "8px", paddingLeft: "12px", font: "14px sans-serif" }),
+			addEventListener: () => {},
+			removeEventListener: () => {}
+		},
+		document: {
+			documentElement: { lang: "zh-CN" },
+			querySelector: (selector) => {
+				if (selector.includes("textarea")) return textarea;
+				return null;
+			},
+			createElement: (tag) => new FakeElement(tag),
+			createTextNode: (t) => ({ type: "text", text: t }),
+			head: { appendChild: () => {} }
+		},
+		console
+	};
+
+	vm.runInNewContext(source, sandbox);
+
+	const registered = new Map();
+	let captureEffect = null;
+	const mockReact = {
+		useState(initial) { return [typeof initial === "function" ? initial() : initial, () => {}]; },
+		useEffect(fn) { captureEffect = fn; },
+		useRef() { return { current: null }; },
+		createElement(type, props, ...children) { return { type, props, children }; }
+	};
+
+	let sessionSub = null;
+	const ctx = {
+		effect() {},
+		get(name) {
+			if (name === "sessions") {
+				return {
+					list: {
+						getSnapshot: () => ({ current: { id: "sess-ph" }, byId: { "sess-ph": { running: false } } }),
+						subscribe: (fn) => {
+							sessionSub = fn;
+							return () => {};
+						}
+					}
+				};
+			}
+			return undefined;
+		},
+		slots: {
+			inject(_name, fn) { fn(); },
+			register(spec, Comp) { registered.set(spec.name, Comp); }
+		}
+	};
+
+	const plugin = loadedDef.factory(() => mockReact);
+	plugin.apply(ctx);
+
+	const Capture = registered.get("tool.call.toolview");
+	Capture({
+		sessionId: "sess-ph",
+		block: {
+			kind: "tool-result",
+			meta: { actions: [{ label: "继续推进", prompt: "继续推进下一步", recommended: true }] }
+		}
+	});
+	if (typeof captureEffect === "function") captureEffect();
+
+	// 触发更新
+	if (typeof sessionSub === "function") sessionSub();
+
+	// 验证 placeholder 已被清空，原内容暂存进 data-dsh-prev-ph
+	assert.equal(textarea.placeholder, "", "显示幽灵时原生 placeholder 应让空");
+	assert.equal(textarea.getAttribute("data-dsh-prev-ph"), "发消息或倒退里程碑...");
+
+	// 验证 overlay 结构：[Tab 采纳] 徽章在左，单行文本在右
+	const overlay = parentEl.children.find((c) => c.className === "dsh-suggest-ghost-overlay");
+	assert.ok(overlay, "创建了 overlay 容器");
+	assert.equal(overlay.style.display, "inline-flex");
+	assert.equal(overlay.children[0].className, "dsh-suggest-ghost-badge");
+	assert.equal(overlay.children[1].className, "dsh-suggest-ghost-text");
+
+	// 模拟用户输入：textarea 有内容，触发更新
+	textarea.value = "我正在输入";
+	if (typeof sessionSub === "function") sessionSub();
+
+	// 验证 placeholder 恢复
+	assert.equal(textarea.placeholder, "发消息或倒退里程碑...", "隐藏幽灵后原生 placeholder 必须恢复");
+	assert.equal(textarea.hasAttribute("data-dsh-prev-ph"), false);
+});
