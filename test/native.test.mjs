@@ -70,7 +70,8 @@ test("模型看到的结果只有一句话，名单走 presentationMeta", () => 
 	assert.equal(rendered.length, 1);
 	assert.doesNotMatch(rendered[0].text, /先看日志/);
 	const meta = tool.output.presentationMeta({ actions: ACTIONS });
-	assert.equal(meta.rev, "0.3.2");
+	const pkgVersion = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+	assert.equal(meta.rev, pkgVersion);
 	assert.equal(meta.displayMode, "both", "默认呈现形态为 both 双形态联动");
 	assert.deepEqual(meta.actions.map((a) => a.label), ["先看日志", "跑测试", "先不做"], "推荐置顶、stop 垫底");
 });

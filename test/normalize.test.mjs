@@ -259,6 +259,22 @@ test("extractDeterministicActions：开放式闲聊或普通回答克制不弹�
 	assert.deepEqual(extractDeterministicActions("你觉得为什么会有这个性能瓶颈？"), []);
 });
 
+test("extractDeterministicActions：行内分号列举的下一步建议（中英文）", () => {
+	const zhText = "要往下做的话，我可以：把《将进酒》全文按敦煌残卷本与通行本做异文对照（「床头明镜」与「高堂明镜」这类差异有实物依据）；或把这两句做成一张竖排书法风格的海报；或按你的场景写一段引用它的短文。";
+	const zhActions = extractDeterministicActions(zhText);
+	assert.equal(zhActions.length, 3);
+	assert.equal(zhActions[0].recommended, true);
+	assert.ok(zhActions[0].label.startsWith("1. 把《将进酒》全文"));
+	assert.ok(zhActions[1].label.startsWith("2. 把这两句做成一张竖排书法风格的海报"));
+	assert.ok(zhActions[2].label.startsWith("3. 按你的场景写一段引用它的短文"));
+
+	const enText = "If you'd like, I can: compare the Dunhuang manuscript with the standard edition; or design a vertical calligraphy poster; or draft a short essay quoting these lines.";
+	const enActions = extractDeterministicActions(enText);
+	assert.equal(enActions.length, 3);
+	assert.equal(enActions[0].recommended, true);
+	assert.ok(enActions[0].label.startsWith("1. compare the Dunhuang"));
+});
+
 test("isDangerousAction：覆盖六大维度 MECE 主流高危命令与中文破坏意图", () => {
 	// 安全操作不应误报
 	const safeCases = [
