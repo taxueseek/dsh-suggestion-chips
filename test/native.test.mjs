@@ -70,7 +70,7 @@ test("模型看到的结果只有一句话，名单走 presentationMeta", () => 
 	assert.equal(rendered.length, 1);
 	assert.doesNotMatch(rendered[0].text, /先看日志/);
 	const meta = tool.output.presentationMeta({ actions: ACTIONS });
-	assert.equal(meta.rev, "0.3.1");
+	assert.equal(meta.rev, "0.3.2");
 	assert.equal(meta.displayMode, "both", "默认呈现形态为 both 双形态联动");
 	assert.deepEqual(meta.actions.map((a) => a.label), ["先看日志", "跑测试", "先不做"], "推荐置顶、stop 垫底");
 });
@@ -618,7 +618,8 @@ test("输入框 Tab 采纳推荐项与尾部胶囊双向联动闭环", () => {
 });
 
 test("中英文语言环境下的 Tab 徽章与高危安全拦截文案效果", () => {
-	const source = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
+	const rawSource = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
+	const source = rawSource.replace("function uiStrings() {", "window.__testUiStrings__ = function uiStrings() {");
 
 	// 中文环境沙箱
 	const zhSandbox = {
@@ -634,7 +635,7 @@ test("中英文语言环境下的 Tab 徽章与高危安全拦截文案效果", 
 		console
 	};
 	vm.runInNewContext(source, zhSandbox);
-	const zhStrings = zhSandbox.window.__uiStrings__();
+	const zhStrings = zhSandbox.window.__testUiStrings__();
 	assert.equal(zhStrings.tabBadge, "Tab 采纳");
 	assert.equal(zhStrings.tabDangerBadge, "⚠ 高危: Tab 填入草稿");
 	assert.equal(zhStrings.recommended, "推荐");
@@ -653,7 +654,7 @@ test("中英文语言环境下的 Tab 徽章与高危安全拦截文案效果", 
 		console
 	};
 	vm.runInNewContext(source, enSandbox);
-	const enStrings = enSandbox.window.__uiStrings__();
+	const enStrings = enSandbox.window.__testUiStrings__();
 	assert.equal(enStrings.tabBadge, "Tab to accept");
 	assert.equal(enStrings.tabDangerBadge, "⚠ Danger: Tab to fill draft");
 	assert.equal(enStrings.recommended, "Recommended");
@@ -1160,3 +1161,80 @@ test("Tab 采纳走 composer 的 setDraft，不改 contenteditable 文本", () =
 function document0(sandbox) {
 	return sandbox.document.querySelector(".dsh-suggest-ghost-overlay") !== null;
 }
+
+
+/** 收集渲染树里所有 className，用于断言徽章种类。children 挂在节点顶层（假 React 的行为）。 */
+function collectClassNames(node, out = []) {
+	if (node === null || node === undefined) return out;
+	if (Array.isArray(node)) { node.forEach((n) => collectClassNames(n, out)); return out; }
+	if (node.props?.className) out.push(node.props.className);
+	if (node.children) collectClassNames(node.children, out);
+	return out;
+}
+
+test("已采纳的胶囊只打「✓ 已采纳」，不误渲染橙色「⚠ 高危」徽章", () => {
+	let loadedDef;
+	const effects = [];
+	const stateSlots = [];
+	let currentHook = 0;
+	const FakeReact = {
+		useState(init) {
+			const idx = currentHook++;
+			if (!(idx in stateSlots)) stateSlots[idx] = typeof init === "function" ? init() : init;
+			return [stateSlots[idx], (next) => {
+				stateSlots[idx] = typeof next === "function" ? next(stateSlots[idx]) : next;
+			}];
+		},
+		useEffect(fn) { effects.push(fn); },
+		useRef(val) { return { current: val }; },
+		createElement(type, props, ...children) { return { type, props, children }; }
+	};
+	const source = readFileSync(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
+	vm.runInNewContext(source, {
+		window: {
+			__ModuleLoader__: { load: (def) => { loadedDef = def; } },
+			setTimeout: () => {},
+			navigator: { language: "zh-CN" }
+		},
+		document: {
+			documentElement: { lang: "zh-CN" },
+			createElement: () => ({}),
+			head: { appendChild: () => {} }
+		},
+		console
+	});
+
+	// 会话日志：先落一条建议，再落一条命中它的用户消息 → 该建议应被标记 adopted
+	const label = "先考证，再跳槽（最快，3-6 个月见效）";
+	const prompt = "按选项 1 执行：先考证，再跳槽（最快，3-6 个月见效）";
+	const entries = [
+		{ event: { type: "tool/result", seq: 5, data: { turn: 1, message: { source: { callId: "c1" } }, meta: { actions: [{ label, prompt, recommended: true }] } } } },
+		{ event: { type: "user/message", seq: 8, data: { message: { source: { kind: "user" }, content: [{ type: "text", text: prompt }] } } } }
+	];
+	const snapshot = { entries, change: { kind: "replace", entries } };
+	const sessions = { binding: () => ({ eventSource: { getSnapshot: () => snapshot, subscribe: () => () => {} } }) };
+
+	const registered = new Map();
+	loadedDef.factory(() => FakeReact).apply({
+		effect(fn) { fn(); },
+		get(name) { return name === "sessions" ? sessions : undefined; },
+		slots: { inject(_n, fn) { fn(); }, register(spec, Comp) { registered.set(spec.name, Comp); } }
+	});
+	const Tail = registered.get("conversation.chat.turnTail");
+	const turn1 = { turn: 1, start: { seq: 1 }, end: { seq: 10 } };
+
+	// 首帧 store 还是空的；hydration 在 effect 里补名单，flush 后再渲染
+	currentHook = 0;
+	assert.equal(Tail({ sessionId: "s1", turn: turn1 }), null);
+	for (const fn of effects.splice(0)) fn();
+	currentHook = 0;
+	const rendered = Tail({ sessionId: "s1", turn: turn1 });
+	assert.notEqual(rendered, null, "应渲染出建议胶囊");
+	const classes = collectClassNames(rendered.children);
+	assert.ok(classes.includes("dsh-suggest-adopted"), "应有「✓ 已采纳」徽章");
+	assert.equal(
+		classes.filter((c) => c === "dsh-suggest-danger").length,
+		0,
+		"已采纳的普通建议不得出现「⚠ 高危」徽章"
+	);
+});
