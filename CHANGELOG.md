@@ -8,7 +8,19 @@
 
 版本号习惯：新能力也走末位。0.1.2 是加功能，版本只从 0.1.1 走到 0.1.2，没有单独腾一个号段给"新功能"。
 
-**当前状态（2026-11-18）**：已在分支 `suggestion-chips` / `main` 更新至 **dsh-suggestion-chips 0.3.3**（中文名「建议胶囊」）：补齐工具说明对问答/解释类完成态的触发提示，并在 Level 0 确定性提取器中新增行内分号列举（`我可以：A；或 B；或 C` / `If you'd like, I can: ...; or ...`）识别。61 项单测全数通过。
+**当前状态（2026-11-19）**：已在分支 `suggestion-chips` / `main` 更新至 **dsh-suggestion-chips 0.3.4**（中文名「建议胶囊」）：修复 `0.3.3` 将宿主核心包 `@deepseek-ai/dsh-tools` 误放进 `dependencies` 导致安装旧版 `0.2.0-rc.2` 触发启动兼容性禁用与 DSH 崩溃的问题，将其迁入 `peerDependencies` 并补齐 `dsh.compatibility.dsh` 兼容范围（覆盖 `0.2.0-rc.2` / `0.2.1-x` / `0.2.2-x`）。
+
+---
+
+## 0.3.4 — 2026-11-19 — 修复宿主核心包误入 dependencies 导致 DSH 启动崩溃
+
+**用户反馈：安装并启用 `0.3.3` 后，整个 DSH 启动崩溃。** 根因是 `package.json` 把 `@deepseek-ai/dsh-tools` 写在了 `dependencies`（`^0.2.0-rc.2`）而非 `peerDependencies`，安装插件时会拉入旧版 `@deepseek-ai/dsh-tools@0.2.0-rc.2`，与宿主（如 `0.2.2-rc.3`）冲突并被启动检查禁用，连带导致 `tools` 服务与必需插件无法激活。
+
+### 修复内容
+
+- **移除 `dependencies` 中的 `@deepseek-ai/dsh-tools`**：迁入 `peerDependencies` 与 `devDependencies`，范围扩展为 `^0.2.0-rc.2 || ^0.2.1-0 || ^0.2.2-0`，避免跨 rc 线被安装或阻断。
+- **补充 `dsh.compatibility.dsh`**：声明 `^0.2.0-rc.2 || ^0.2.1-0 || ^0.2.2-0`，与实际宿主窗口对齐。
+- **使用 `plugin-fast-adapt` 全流程复核**：`standards-scan` 0 命中、`plugin-audit` 100/100、`quick-smoke` 通过、`code-scan`（`0.2.0-rc.2 → 0.2.2-rc.5`）9 处 `member` 命中经源码核对均为同名符号误报（`lib/index.js` 已使用 `{ when }` 条件注册、`lib/client.js` 为内部 store 与 toolview 槽位）。
 
 ---
 

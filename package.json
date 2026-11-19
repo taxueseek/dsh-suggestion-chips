@@ -1,6 +1,6 @@
 {
   "name": "dsh-suggestion-chips",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Clickable suggestion chips and Tab ghost prediction: Level 0 deterministic extraction, dual-mode synergy (both/chips/tab), high-risk safety gate, and adoption indicator.",
   "type": "module",
   "main": "lib/index.js",
@@ -39,14 +39,15 @@
     },
     "client": {
       "platform": "web"
+    },
+    "compatibility": {
+      "dsh": "^0.2.0-rc.2 || ^0.2.1-0 || ^0.2.2-0"
     }
   },
-  "dependencies": {
-    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2"
-  },
   "peerDependencies": {
-    "react": "^18.2.0",
-    "@deepseek-ai/schemastery": "^3.19.0"
+    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2 || ^0.2.1-0 || ^0.2.2-0",
+    "@deepseek-ai/schemastery": "^3.19.0",
+    "react": "^18.2.0"
   },
   "peerDependenciesMeta": {
     "react": {
@@ -66,6 +67,7 @@
   },
   "icon": "assets/icon.svg",
   "devDependencies": {
+    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2 || ^0.2.1-0 || ^0.2.2-0",
     "@deepseek-ai/schemastery": "^3.19.0"
   }
 }
