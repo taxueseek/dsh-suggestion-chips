@@ -22,11 +22,20 @@
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",
+    "deepseek-harness-plugin",
     "dsh",
+    "dsh-plugins",
+    "dsh-ecosystem",
+    "deepseek",
+    "deepseek-ai",
     "suggestion-chips",
     "suggestions",
+    "suggestion",
     "chips",
-    "ui"
+    "tab-completion",
+    "ghost-text",
+    "ui",
+    "ai-agent"
   ],
   "license": "MIT",
   "author": "taxueseek",

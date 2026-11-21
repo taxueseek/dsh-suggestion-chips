@@ -1,5 +1,7 @@
 # dsh-suggestion-chips
 
+<p align="center"><a href="README.md">中文</a> · English</p>
+
 Clickable **suggestion chips** under every reply in DeepSeek Harness. One click sends that text as your message — no typing. Each suggestion also has a small fill button on its right: it only puts that sentence into the composer, so you can edit it before sending. Destructive high-risk actions are marked with ⚠ warning and strictly intercepted from direct sending. Includes adoption indicator for past turns.
 
 It answers "I've read it, now should it do A or B": instead of composing the sentence yourself, just click it.
@@ -60,6 +62,17 @@ The few words the plugin draws itself ("Recommended", "N more", "Show less") fol
 
 Suggestions without a stance still render (backwards compatible).
 
+## Open a new session
+
+When a session has run long enough that it should end, instead of copying the conclusion yourself, creating a new session and pasting it back, offer a suggestion with `opensNewSession: true`: one click creates a new session (same working directory), switches to it, and places that text into the new session's composer.
+
+- **Draft only, never auto-sent.** Auto-sending would immediately start a model turn — spending the user's money for them; filling the composer leaves room to add a line before Enter.
+- **At most one such suggestion per session** — extras beyond the first are dropped.
+- The button carries a "New session" badge to set it apart from normal suggestions.
+- Failures are explained below the button (session service not up, could not switch to foreground, composer never became ready) — never silent.
+
+**Not the same as the official fork**: a fork copies the whole history prefix, so the new session's context is as long as the original's and saves no tokens; this carries only the text you wrote. Use fork to continue exactly where you left off; use this to save tokens.
+
 ## Leaner and more native (0.2.0)
 
 - **Tool schema 3,822 → 1,465 chars** (≈956 → ≈366 tokens, sent on every request). Each rule is stated once, and the description now says *when not to call*: only when the task is done or blocked on a user-only choice, do doable steps first, never in plan mode.
@@ -70,30 +83,55 @@ Suggestions without a stance still render (backwards compatible).
 
 ## Configuration & Dual-Mode (0.3.0)
 
-Configured via the bundle patch in your profile:
+Configured via the plugin's **own** bundle patch — **not** the profile's `cordis.patch.yml`. The profile patch is applied before the plugin's insert row exists, so a same-id line there is silently ignored (verified 2026-09-26 on another plugin):
 
 ```yaml
 - insert:
     - id: suggestion-chips
       name: 'dsh-suggestion-chips'
       config:
-        displayMode: both  # both (default, chips + Tab ghost) | chips (tail buttons only) | tab (composer ghost only) | none
-        maxActions: 5      # 1-6 actions per turn
-        concludeTurn: true # end turn immediately upon calling suggest_actions
+        displayMode: both  # presentation mode: both (default, dual-mode) | chips (tail chips only) | tab (composer Tab ghost only) | none (off)
+        maxActions: 5      # per-turn cap (1-6); extras are dropped; the UI follows this number
+        concludeTurn: true # default true (the call ends the turn); set false to keep branch buttons for the turn or avoid the collapse in final-reply-only mode
 ```
 
-- **`both` (Default)**: Combines turn-tail suggestion chips with an inline ghost suggestion in the empty composer. Press `Tab` to accept the recommended action into the draft instantly, with full 2-way sync marking the chip as adopted.
-- **`chips`**: Tail suggestion chips only.
-- **`tab`**: Minimalist Claude Code / Codex style composer ghost prediction only.
-- **IME & Danger Protection**: Completely suspends key interception during Chinese Pinyin composition; high-risk actions are marked with warning badges and forced to draft-only when Tab is pressed.
+With no `config`, `displayMode` defaults to `"both"`, `maxActions` to 5 (equal to the five stances) and `concludeTurn` to `true`. Restart DSH after changing config — it is read at startup.
+
+- **`both` (default, dual-mode)**: turn-tail chips show the full branching set; when the composer draft is empty, a ghost projection of the top recommended entry (`recommended: true`) appears in the composer — `Tab` adopts it into the draft instantly, and the corresponding chip is auto-marked as adopted.
+- **`chips`**: tail suggestion chips only; the composer stays native.
+- **`tab`**: tail buttons fully hidden; Claude Code-style Tab ghost prediction in the composer only.
+- **Safety & IME protection**: high-risk actions carry a warning badge in the composer and `Tab` is forced to draft-only (never send); key interception is fully suspended during Chinese pinyin composition. All features adapt to Chinese and English environments.
+
+> 2026-09-29 fix: the default used to be 3 — and the fold threshold was also 3, so the two caps matched and "N more" never had anything to unfold; a fourth or fifth distinct action was cut host-side. The default is now 5, which is what makes the fold row useful.
 
 ## Limits
 
-- Requires the DSH **0.1.7** line (`conversation.chat.turnTail`, `conversation.input.shell`, `tool.call.toolview`).
+- Requires the DSH **0.1.7** line (`conversation.chat.turnTail`, `conversation.input.shell`, `tool.call.toolview`). "End the turn on call", "no declaration for subagents" and "list via presentationMeta" use the 0.2.2 host interfaces; on older hosts the first two automatically fall back to the old behavior (one extra step, global declaration).
+- Old sessions from 0.1.x still render their buttons when scrolled back: the UI reads `meta` first and falls back to the result text. Since 0.2.1 the list is replayed from the session event stream, no longer depending on whether that tool call was ever rendered (refreshing the page included).
+- When the model does not call `suggest_actions`, the built-in Level 0 extractor falls back to the reply text: numbered options, confirmation questions, and wrap-up closings, in both Chinese and English. The model is allowed not to call it (suggestions belong when the task is done or blocked on a user-only choice, not on mid-task steps), so "no buttons this turn" is not a malfunction.
 - Button text comes from the model; keep labels under ~20 characters or they look heavy.
 - Normal suggestions send immediately with no confirmation — by design. High-risk actions are intercepted and safely filled into the composer for review; to edit any suggestion first, use the fill button on the right.
 - Rapid clicks are debounced for ~0.9s.
 
+## Developer notes
+
+Implementation details, pitfalls, and "why none of the other three positions" live in the repo comments; the `conversation.chat.turnTail` placement was chosen from the official 72 extension slots.
+
 ## License
 
 MIT
+
+## Development
+
+```bash
+pnpm test      # 49 unit tests, zero external dependencies (node:test)
+```
+
+Code layout:
+
+- `lib/normalize.js` — cleaning rules, tool description and the per-turn reactive store (whitespace, dedupe, stances, ordering, cap, `readHostActions`, `createSuggestionStore`); pure functions, unit-testable
+- `lib/index.js` — registers the tool and reads config (strictly honors the DSH function-plugin 4-export contract: `Config`, `apply`, `inject`, `name`); the cleaned list travels to the UI via `presentationMeta`, and the model only ever gets one sentence
+- `lib/client.js` — browser side. Owned by `apply(ctx)`: keeps the reactive store indexed by `(sessionId, turn / seq)`, cleaned up on `ctx.effect`, records and renders the host's list per turn — no rule is duplicated
+- `test/native.test.mjs` — 0.2.0 nativeness regression: 4-export contract, description length, single-sentence result, `concludeTurn` switch, no subagent declaration, old-log fallback, per-turn store and client-slot lifecycle
+
+Edge behavior is pinned by tests: non-arrays, bad JSON, blank labels, duplicate labels, duplicate stances, invalid stances, over-cap counts, out-of-range `maxActions`. UI side: buttons at most 520px wide, labels at most two lines (full text on hover), 0.9s click debounce, the "Recommended" pick highlighted, and the fill button drafts only without sending (clearing the previous draft first). Multi-turn sessions map suggestions precisely by `turn` (or event `seq` range) — no cross-turn leakage.

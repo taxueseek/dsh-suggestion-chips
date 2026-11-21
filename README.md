@@ -1,5 +1,7 @@
 # dsh-suggestion-chips（建议胶囊）
 
+<p align="center">中文 · <a href="README.en.md">English</a></p>
+
 <img src="assets/icon.svg" width="96" alt="图标">
 
 给 DeepSeek Harness 的每条回复末尾加一排**可点的建议胶囊（Suggestion Chips）**。点一下，那句话就直接作为你的消息发出去——不用自己打。每条建议右侧还有一个小按钮（输入框图标）：点它只把这句话**放进输入框**，你改完再发。针对破坏性高危操作自动提供 ⚠ 警示并强制拦截一键直发，支持历史轮次采纳闭环状态指示。
